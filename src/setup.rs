@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy::render::mesh::{Mesh, VertexAttributeValues, Indices, PrimitiveTopology};
 use rapier2d::prelude::*;
 use rapier2d::na::Point2;
-use noise::{NoiseFn, Fbm};
+use noise::{NoiseFn, Fbm, Perlin};
 
 
 use crate::physics_resources::*;
@@ -10,6 +10,12 @@ use crate::physics_resources::*;
 
 #[derive(Component)]
 pub struct Player;
+
+#[derive(Component)]
+pub struct PlayerSprite;
+
+#[derive(Component)]
+pub struct WaterSprite;
 
 #[derive(Component)]
 pub struct Floor;
@@ -34,15 +40,15 @@ struct AnimationTimer(Timer);
 impl Plugin for SetupPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, (setup, terrain));
-        app.add_systems(Update, (update, layer_checker, animate_sprite));
+        app.add_systems(Update, (update, layer_checker, animate_player_sprite, animate_water_sprite));
         app.add_systems(Update, inspect_mesh_data);
     }
 }
 
-fn animate_sprite(
+fn animate_player_sprite(
     time: Res<Time>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut query: Query<(&AnimationIndices, &mut AnimationTimer, &mut Sprite, &mut Transform)>,
+    mut query: Query<(&AnimationIndices, &mut AnimationTimer, &mut Sprite, &mut Transform), With<PlayerSprite>>,
 ) {
     for (indices, mut timer, mut sprite, mut transform) in &mut query {
         timer.tick(time.delta());
@@ -83,6 +89,24 @@ fn animate_sprite(
             // Jeśli gracz stoi, ustaw indeks na 0
             if let Some(atlas) = &mut sprite.texture_atlas {
                 atlas.index = indices.first;
+            }
+        }
+    }
+}
+
+fn animate_water_sprite(
+    time: Res<Time>,
+    mut query: Query<(&AnimationIndices, &mut AnimationTimer, &mut Sprite, &mut Transform), With<WaterSprite>>,
+) {
+    for (indices, mut timer, mut sprite, mut transform) in &mut query {
+        timer.tick(time.delta());
+        if timer.just_finished() {
+            if let Some(atlas) = &mut sprite.texture_atlas {
+                atlas.index = if atlas.index == indices.last {
+                    indices.first
+                } else {
+                    atlas.index + 1
+                };
             }
         }
     }
@@ -142,212 +166,98 @@ fn setup(
             Transform::from_xyz(0.0, 43.0, 0.0).with_scale(Vec3::splat(2.5)),
             animation_indices,
             AnimationTimer(Timer::from_seconds(0.1, TimerMode::Repeating)),
+            PlayerSprite,
         )]
     ));
-    /*commands.spawn((
-        Wall,
-        Pending,
-        Mesh2d(meshes.add(Rectangle::new(100.0, 100.0))),
-        Transform::from_xyz(75.0, 50.0, 0.0),
-        children![(
-        Sprite::from_image(asset_server.load("textures/main_wall.png")),
-            Transform::from_xyz(0.0, 0.0, 0.0)
-                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
-        ),(
-            Sprite::from_image(asset_server.load("textures/side_wall.png")),
-            Transform::from_xyz(-100.0, 0.0, 0.05)
-                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
-        ),(
-            Sprite::from_image(asset_server.load("textures/up_wall.png")),
-            Transform::from_xyz(0.0, 100.0, 0.05)
-                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
-        ),(
-            Sprite::from_image(asset_server.load("textures/corner_wall.png")),
-            Transform::from_xyz(-100.0, 100.0, 0.1)
-                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
-        )],
-    ));
-    commands.spawn((
-        Wall,
-        Pending,
-        Mesh2d(meshes.add(Rectangle::new(100.0, 100.0))),
-        Transform::from_xyz(-25.0, 50.0, 0.0),
-        children![(
-        Sprite::from_image(asset_server.load("textures/main_wall.png")),
-            Transform::from_xyz(0.0, 0.0, 0.0)
-                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
-        ),(
-            Sprite::from_image(asset_server.load("textures/side_wall.png")),
-            Transform::from_xyz(-100.0, 0.0, 0.05)
-                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
-        ),(
-            Sprite::from_image(asset_server.load("textures/up_wall.png")),
-            Transform::from_xyz(0.0, 100.0, 0.05)
-                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
-        ),(
-            Sprite::from_image(asset_server.load("textures/corner_wall.png")),
-            Transform::from_xyz(-100.0, 100.0, 0.1)
-                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
-        )],
-    ));
-    commands.spawn((
-        Wall,
-        Pending,
-        Mesh2d(meshes.add(Rectangle::new(100.0, 100.0))),
-        Transform::from_xyz(-225.0, 50.0, 0.0),
-        children![(
-        Sprite::from_image(asset_server.load("textures/main_wall.png")),
-            Transform::from_xyz(0.0, 0.0, 0.0)
-                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
-        ),(
-            Sprite::from_image(asset_server.load("textures/side_wall.png")),
-            Transform::from_xyz(-100.0, 0.0, 0.05)
-                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
-        ),(
-            Sprite::from_image(asset_server.load("textures/up_wall.png")),
-            Transform::from_xyz(0.0, 100.0, 0.05)
-                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
-        ),(
-            Sprite::from_image(asset_server.load("textures/corner_wall.png")),
-            Transform::from_xyz(-100.0, 100.0, 0.1)
-                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
-        )],
-    ));
-    commands.spawn((
-        Wall,
-        Pending,
-        Mesh2d(meshes.add(Rectangle::new(100.0, 100.0))),
-        Transform::from_xyz(-225.0, 150.0, 0.0),
-        children![(
-        Sprite::from_image(asset_server.load("textures/main_wall.png")),
-            Transform::from_xyz(0.0, 0.0, 0.0)
-                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
-        ),(
-            Sprite::from_image(asset_server.load("textures/side_wall.png")),
-            Transform::from_xyz(-100.0, 0.0, 0.05)
-                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
-        ),(
-            Sprite::from_image(asset_server.load("textures/up_wall.png")),
-            Transform::from_xyz(0.0, 100.0, 0.05)
-                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
-        ),(
-            Sprite::from_image(asset_server.load("textures/corner_wall.png")),
-            Transform::from_xyz(-100.0, 100.0, 0.1)
-                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
-        )],
-    ));
-    commands.spawn((
-        Wall,
-        Pending,
-        Mesh2d(meshes.add(Rectangle::new(100.0, 100.0))),
-        Transform::from_xyz(-225.0, 250.0, 0.0),
-        children![(
-        Sprite::from_image(asset_server.load("textures/main_wall.png")),
-            Transform::from_xyz(0.0, 0.0, 0.0)
-                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
-        ),(
-            Sprite::from_image(asset_server.load("textures/side_wall.png")),
-            Transform::from_xyz(-100.0, 0.0, 0.05)
-                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
-        ),(
-            Sprite::from_image(asset_server.load("textures/up_wall.png")),
-            Transform::from_xyz(0.0, 100.0, 0.05)
-                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
-        ),(
-            Sprite::from_image(asset_server.load("textures/corner_wall.png")),
-            Transform::from_xyz(-100.0, 100.0, 0.1)
-                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
-        )],
-    ));
-    commands.spawn((
-        Wall,
-        Pending,
-        Mesh2d(meshes.add(Rectangle::new(100.0, 100.0))),
-        Transform::from_xyz(-125.0, 250.0, 0.0),
-        children![(
-        Sprite::from_image(asset_server.load("textures/main_wall.png")),
-            Transform::from_xyz(0.0, 0.0, 0.0)
-                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
-        ),(
-            Sprite::from_image(asset_server.load("textures/side_wall.png")),
-            Transform::from_xyz(-100.0, 0.0, 0.05)
-                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
-        ),(
-            Sprite::from_image(asset_server.load("textures/up_wall.png")),
-            Transform::from_xyz(0.0, 100.0, 0.05)
-                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
-        ),(
-            Sprite::from_image(asset_server.load("textures/corner_wall.png")),
-            Transform::from_xyz(-100.0, 100.0, 0.1)
-                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
-        )],
-    ));
-    commands.spawn((
-        Floor,
-        Mesh2d(meshes.add(Rectangle::new(500.0, 500.0))),
-        ///MeshMaterial2d(materials.add(Color::hsl(0.865, 0.195, 0.27))),
-        Transform::from_xyz(
-            0.0,
-            0.0,
-            -1.0,
-        ),
-        children![(
-            Sprite::from_image(asset_server.load("textures/sand.png")),
-            Transform::from_xyz(0.0, 0.0, 0.0)
-                .with_scale(Vec3::new(500.0/32.0, 500.0/32.0, 1.0)),
-        )],
-    ));*/
 }
 
 pub fn terrain(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     asset_server: Res<AssetServer>,
+    mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
 ) {
-    let fbm = Fbm::<noise::Perlin>::new(1);
+    let terrain_noise = Fbm::<Perlin>::new(1);
+    let path_noise = Fbm::<Perlin>::new(2);
 
-    let world_size_x = 50; // w kafelkach
+    let world_size_x = 50;
     let world_size_y = 50;
     let tile_size = 64.0;
 
-    // przesunięcie tak, aby środek był (0,0)
     let x_offset = (world_size_x as f32 * tile_size) / 2.0;
     let y_offset = (world_size_y as f32 * tile_size) / 2.0;
+
+    // atlas dla animacji wody (np. 4x4 tile 32x32)
+    let water_texture = asset_server.load("textures/water.png");
+    let water_layout = TextureAtlasLayout::from_grid(UVec2::splat(32), 2, 2, None, None);
+    let water_atlas = texture_atlas_layouts.add(water_layout);
 
     for gx in 0..world_size_x {
         for gy in 0..world_size_y {
             let x = gx as f32 * tile_size - x_offset;
             let y = gy as f32 * tile_size - y_offset;
 
-            // noise dla podłoża
-            let value = fbm.get([gx as f64 / 10.0, gy as f64 / 10.0]);
+            let terrain_val = terrain_noise.get([gx as f64 / 15.0, gy as f64 / 15.0]);
 
-            let texture_path = if value < -0.25 {
+            // bazowa tekstura
+            let mut texture_path = if terrain_val < -0.45 {
+                "textures/water" // marker
+            } else if terrain_val < -0.25 {
                 "textures/sand.png"
-            } else if value < 0.0 {
+            } else if terrain_val < 0.0 {
                 "textures/dirt.png"
-            } else if value < 0.25 {
-                "textures/path.png"
+            } else if terrain_val < 0.3 {
+                "textures/grass.png"
             } else {
                 "textures/stone.png"
             };
 
-            // spawn floor
-            commands.spawn((
-                Floor,
-                Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
-                Transform::from_xyz(x, y, -1.0),
-                children![(
-                    Sprite::from_image(asset_server.load(texture_path)),
-                    Transform::from_xyz(0.0, 0.0, 0.0)
-                        .with_scale(Vec3::splat(tile_size / 32.0)),
-                )],
-            ));
+            // path tylko na dirt/grass
+            if texture_path == "textures/dirt.png" || texture_path == "textures/grass.png" {
+                let path_val = path_noise.get([gx as f64 / 8.0, gy as f64 / 8.0]);
+                if path_val.abs() < 0.05 {
+                    texture_path = "textures/path.png";
+                }
+            }
 
-            // jeśli to stone → 50% szans na wall
+            // === Floor ===
+            if texture_path == "textures/water" {
+                // specjalny spawn z animacją
+                commands.spawn((
+                    Floor,
+                    Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
+                    Transform::from_xyz(x, y, -1.0),
+                    children![(
+                        Sprite::from_atlas_image(
+                            water_texture.clone(),
+                            TextureAtlas {
+                                layout: water_atlas.clone(),
+                                index: 0,
+                            },
+                        ),
+                        Transform::from_scale(Vec3::splat(tile_size / 32.0)),
+                        AnimationIndices { first: 0, last: 3 },
+                        AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
+                        WaterSprite,
+                    )],
+                ));
+            } else {
+                // zwykłe kafelki
+                commands.spawn((
+                    Floor,
+                    Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
+                    Transform::from_xyz(x, y, -1.0),
+                    children![(
+                        Sprite::from_image(asset_server.load(texture_path)),
+                        Transform::from_scale(Vec3::splat(tile_size / 32.0)),
+                    )],
+                ));
+            }
+
+            // ściany tylko na stone
             if texture_path == "textures/stone.png" {
-                let wall_noise = fbm.get([gx as f64 / 5.0, gy as f64 / 5.0, 999.0]);
-                if wall_noise > 0.0 {
+                let wall_val = terrain_noise.get([gx as f64 / 6.0, gy as f64 / 6.0, 999.0]);
+                if wall_val > 0.0 {
                     spawn_wall(&mut commands, &mut meshes, &asset_server, x, y, tile_size);
                 }
             }
@@ -357,7 +267,6 @@ pub fn terrain(
     // barierka wokół świata
     for gx in 0..world_size_x {
         for gy in 0..world_size_y {
-            // jeśli na krawędzi mapy → dodaj wall
             if gx == 0 || gy == 0 || gx == world_size_x - 1 || gy == world_size_y - 1 {
                 let x = gx as f32 * tile_size - x_offset;
                 let y = gy as f32 * tile_size - y_offset;
