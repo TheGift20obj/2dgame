@@ -32,7 +32,7 @@ struct AnimationTimer(Timer);
 impl Plugin for SetupPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup);
-        app.add_systems(Update, update).add_systems(Update, animate_sprite);
+        app.add_systems(Update, (update, layer_checker, animate_sprite));
         app.add_systems(Update, inspect_mesh_data);
     }
 }
@@ -86,28 +86,48 @@ fn animate_sprite(
     }
 }
 
+fn layer_checker(
+    player_query: Query<&Transform, (With<Player>, Without<Pending>)>,
+    mut wall_query: Query<&mut Transform, (With<Wall>, Without<Pending>, Without<Player>)>,
+) {
+    let Ok(player_transform) = player_query.single() else {
+        return;
+    };
+
+    for mut wall_transform in &mut wall_query.iter_mut() {
+
+        if (player_transform.translation.y+25.0/2.0) <= (wall_transform.translation.y-(100.0/(100.0/32.0))/2.0) {
+            wall_transform.translation.z = 0.0;
+        } else {
+            wall_transform.translation.z = 2.0;
+        }
+    }
+}
+
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     asset_server: Res<AssetServer>,
     mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
+    images: Res<Assets<Image>>,
 ) {
     let texture = asset_server.load("textures/player_sprite.png");
     let layout = TextureAtlasLayout::from_grid(UVec2::splat(64), 2, 2, None, None);
     let texture_atlas_layout = texture_atlas_layouts.add(layout);
     let animation_indices = AnimationIndices { first: 0, last: 3 };
 
-    commands.spawn(Camera2d);
+    //commands.spawn(Camera2d);
     commands.spawn((
+        Camera2d,
         Player,
         Pending,
-        Mesh2d(meshes.add(Rectangle::new(50.0, 100.0))),
+        Mesh2d(meshes.add(Rectangle::new(50.0, 25.0))),
         //MeshMaterial2d(materials.add(Color::hsl(0.25, 0.95, 0.7))),
         Transform::from_xyz(
             0.0,
             0.0,
-            0.0,
+            1.0,
         ),
         children![(
             Sprite::from_atlas_image(
@@ -117,7 +137,7 @@ fn setup(
                     index: animation_indices.first,
                 },
             ),
-            Transform::from_scale(Vec3::splat(2.5)),
+            Transform::from_xyz(0.0, 43.0, 0.0).with_scale(Vec3::splat(2.5)),
             animation_indices,
             AnimationTimer(Timer::from_seconds(0.1, TimerMode::Repeating)),
         )]
@@ -125,13 +145,140 @@ fn setup(
     commands.spawn((
         Wall,
         Pending,
-        Mesh2d(meshes.add(Rectangle::new(50.0, 450.0))),
-        MeshMaterial2d(materials.add(Color::hsl(0.85, 0.15, 0.47))),
-        Transform::from_xyz(
-            225.0,
-            0.0,
-            0.0,
-        ),
+        Mesh2d(meshes.add(Rectangle::new(100.0, 100.0))),
+        Transform::from_xyz(75.0, 50.0, 0.0),
+        children![(
+        Sprite::from_image(asset_server.load("textures/main_wall.png")),
+            Transform::from_xyz(0.0, 0.0, 0.0)
+                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
+        ),(
+            Sprite::from_image(asset_server.load("textures/side_wall.png")),
+            Transform::from_xyz(-100.0, 0.0, 0.05)
+                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
+        ),(
+            Sprite::from_image(asset_server.load("textures/up_wall.png")),
+            Transform::from_xyz(0.0, 100.0, 0.05)
+                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
+        ),(
+            Sprite::from_image(asset_server.load("textures/corner_wall.png")),
+            Transform::from_xyz(-100.0, 100.0, 0.1)
+                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
+        )],
+    ));
+    commands.spawn((
+        Wall,
+        Pending,
+        Mesh2d(meshes.add(Rectangle::new(100.0, 100.0))),
+        Transform::from_xyz(-25.0, 50.0, 0.0),
+        children![(
+        Sprite::from_image(asset_server.load("textures/main_wall.png")),
+            Transform::from_xyz(0.0, 0.0, 0.0)
+                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
+        ),(
+            Sprite::from_image(asset_server.load("textures/side_wall.png")),
+            Transform::from_xyz(-100.0, 0.0, 0.05)
+                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
+        ),(
+            Sprite::from_image(asset_server.load("textures/up_wall.png")),
+            Transform::from_xyz(0.0, 100.0, 0.05)
+                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
+        ),(
+            Sprite::from_image(asset_server.load("textures/corner_wall.png")),
+            Transform::from_xyz(-100.0, 100.0, 0.1)
+                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
+        )],
+    ));
+    commands.spawn((
+        Wall,
+        Pending,
+        Mesh2d(meshes.add(Rectangle::new(100.0, 100.0))),
+        Transform::from_xyz(-225.0, 50.0, 0.0),
+        children![(
+        Sprite::from_image(asset_server.load("textures/main_wall.png")),
+            Transform::from_xyz(0.0, 0.0, 0.0)
+                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
+        ),(
+            Sprite::from_image(asset_server.load("textures/side_wall.png")),
+            Transform::from_xyz(-100.0, 0.0, 0.05)
+                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
+        ),(
+            Sprite::from_image(asset_server.load("textures/up_wall.png")),
+            Transform::from_xyz(0.0, 100.0, 0.05)
+                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
+        ),(
+            Sprite::from_image(asset_server.load("textures/corner_wall.png")),
+            Transform::from_xyz(-100.0, 100.0, 0.1)
+                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
+        )],
+    ));
+    commands.spawn((
+        Wall,
+        Pending,
+        Mesh2d(meshes.add(Rectangle::new(100.0, 100.0))),
+        Transform::from_xyz(-225.0, 150.0, 0.0),
+        children![(
+        Sprite::from_image(asset_server.load("textures/main_wall.png")),
+            Transform::from_xyz(0.0, 0.0, 0.0)
+                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
+        ),(
+            Sprite::from_image(asset_server.load("textures/side_wall.png")),
+            Transform::from_xyz(-100.0, 0.0, 0.05)
+                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
+        ),(
+            Sprite::from_image(asset_server.load("textures/up_wall.png")),
+            Transform::from_xyz(0.0, 100.0, 0.05)
+                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
+        ),(
+            Sprite::from_image(asset_server.load("textures/corner_wall.png")),
+            Transform::from_xyz(-100.0, 100.0, 0.1)
+                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
+        )],
+    ));
+    commands.spawn((
+        Wall,
+        Pending,
+        Mesh2d(meshes.add(Rectangle::new(100.0, 100.0))),
+        Transform::from_xyz(-225.0, 250.0, 0.0),
+        children![(
+        Sprite::from_image(asset_server.load("textures/main_wall.png")),
+            Transform::from_xyz(0.0, 0.0, 0.0)
+                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
+        ),(
+            Sprite::from_image(asset_server.load("textures/side_wall.png")),
+            Transform::from_xyz(-100.0, 0.0, 0.05)
+                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
+        ),(
+            Sprite::from_image(asset_server.load("textures/up_wall.png")),
+            Transform::from_xyz(0.0, 100.0, 0.05)
+                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
+        ),(
+            Sprite::from_image(asset_server.load("textures/corner_wall.png")),
+            Transform::from_xyz(-100.0, 100.0, 0.1)
+                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
+        )],
+    ));
+    commands.spawn((
+        Wall,
+        Pending,
+        Mesh2d(meshes.add(Rectangle::new(100.0, 100.0))),
+        Transform::from_xyz(-125.0, 250.0, 0.0),
+        children![(
+        Sprite::from_image(asset_server.load("textures/main_wall.png")),
+            Transform::from_xyz(0.0, 0.0, 0.0)
+                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
+        ),(
+            Sprite::from_image(asset_server.load("textures/side_wall.png")),
+            Transform::from_xyz(-100.0, 0.0, 0.05)
+                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
+        ),(
+            Sprite::from_image(asset_server.load("textures/up_wall.png")),
+            Transform::from_xyz(0.0, 100.0, 0.05)
+                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
+        ),(
+            Sprite::from_image(asset_server.load("textures/corner_wall.png")),
+            Transform::from_xyz(-100.0, 100.0, 0.1)
+                .with_scale(Vec3::new(100.0/32.0, 100.0/32.0, 1.0)),
+        )],
     ));
     commands.spawn((
         Floor,

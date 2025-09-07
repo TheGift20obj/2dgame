@@ -72,7 +72,9 @@ fn sync_physics_to_transform(
             let translation = pos.translation;
             let rotation = pos.rotation.angle();;
 
-            transform.translation = Vec3::new(translation.x, translation.y, transform.translation.z);
+            transform.translation.x = translation.x;
+            transform.translation.y = translation.y;
+            //transform.translation = Vec3::new(translation.x, translation.y, transform.translation.z);
             transform.rotation = Quat::from_rotation_z(rotation);
         }
     }
