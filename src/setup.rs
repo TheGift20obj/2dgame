@@ -306,14 +306,18 @@ pub fn terrain(
 ) {
     let fbm = Fbm::<noise::Perlin>::new(1);
 
-    let world_size_x = 50; // 50 tiles wide
-    let world_size_y = 50; // 50 tiles tall
+    let world_size_x = 50; // w kafelkach
+    let world_size_y = 50;
     let tile_size = 64.0;
+
+    // przesunięcie tak, aby środek był (0,0)
+    let x_offset = (world_size_x as f32 * tile_size) / 2.0;
+    let y_offset = (world_size_y as f32 * tile_size) / 2.0;
 
     for gx in 0..world_size_x {
         for gy in 0..world_size_y {
-            let x = gx as f32 * tile_size;
-            let y = gy as f32 * tile_size;
+            let x = gx as f32 * tile_size - x_offset;
+            let y = gy as f32 * tile_size - y_offset;
 
             // noise dla podłoża
             let value = fbm.get([gx as f64 / 10.0, gy as f64 / 10.0]);
@@ -329,48 +333,71 @@ pub fn terrain(
             };
 
             // spawn floor
-            let floor_entity = commands.spawn((
+            commands.spawn((
                 Floor,
                 Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
                 Transform::from_xyz(x, y, -1.0),
                 children![(
                     Sprite::from_image(asset_server.load(texture_path)),
                     Transform::from_xyz(0.0, 0.0, 0.0)
-                        .with_scale(Vec3::splat(1.0)),
+                        .with_scale(Vec3::splat(tile_size / 32.0)),
                 )],
-            )).id();
+            ));
 
             // jeśli to stone → 50% szans na wall
             if texture_path == "textures/stone.png" {
                 let wall_noise = fbm.get([gx as f64 / 5.0, gy as f64 / 5.0, 999.0]);
                 if wall_noise > 0.0 {
-                    commands.spawn((
-                        Wall,
-                        Pending,
-                        Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
-                        Transform::from_xyz(x, y, 0.0),
-                        children![(
-                            Sprite::from_image(asset_server.load("textures/main_wall.png")),
-                            Transform::from_xyz(0.0, 0.0, 0.0)
-                                .with_scale(Vec3::splat(1.0)),
-                        ),(
-                            Sprite::from_image(asset_server.load("textures/side_wall.png")),
-                            Transform::from_xyz(-tile_size, 0.0, 0.05)
-                                .with_scale(Vec3::splat(1.0)),
-                        ),(
-                            Sprite::from_image(asset_server.load("textures/up_wall.png")),
-                            Transform::from_xyz(0.0, tile_size, 0.05)
-                                .with_scale(Vec3::splat(1.0)),
-                        ),(
-                            Sprite::from_image(asset_server.load("textures/corner_wall.png")),
-                            Transform::from_xyz(-tile_size, tile_size, 0.1)
-                                .with_scale(Vec3::splat(1.0)),
-                        )],
-                    ));
+                    spawn_wall(&mut commands, &mut meshes, &asset_server, x, y, tile_size);
                 }
             }
         }
     }
+
+    // barierka wokół świata
+    for gx in 0..world_size_x {
+        for gy in 0..world_size_y {
+            // jeśli na krawędzi mapy → dodaj wall
+            if gx == 0 || gy == 0 || gx == world_size_x - 1 || gy == world_size_y - 1 {
+                let x = gx as f32 * tile_size - x_offset;
+                let y = gy as f32 * tile_size - y_offset;
+                spawn_wall(&mut commands, &mut meshes, &asset_server, x, y, tile_size);
+            }
+        }
+    }
+}
+
+fn spawn_wall(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    asset_server: &Res<AssetServer>,
+    x: f32,
+    y: f32,
+    tile_size: f32,
+) {
+    commands.spawn((
+        Wall,
+        Pending,
+        Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
+        Transform::from_xyz(x, y, 0.0),
+        children![(
+            Sprite::from_image(asset_server.load("textures/main_wall.png")),
+            Transform::from_xyz(0.0, 0.0, 0.0)
+                .with_scale(Vec3::splat(tile_size / 32.0)),
+        ),(
+            Sprite::from_image(asset_server.load("textures/side_wall.png")),
+            Transform::from_xyz(-tile_size, 0.0, 0.05)
+                .with_scale(Vec3::splat(tile_size / 32.0)),
+        ),(
+            Sprite::from_image(asset_server.load("textures/up_wall.png")),
+            Transform::from_xyz(0.0, tile_size, 0.05)
+                .with_scale(Vec3::splat(tile_size / 32.0)),
+        ),(
+            Sprite::from_image(asset_server.load("textures/corner_wall.png")),
+            Transform::from_xyz(-tile_size, tile_size, 0.1)
+                .with_scale(Vec3::splat(tile_size / 32.0)),
+        )],
+    ));
 }
 
 fn update(
