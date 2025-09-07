@@ -2,6 +2,8 @@ use bevy::prelude::*;
 use bevy::render::mesh::{Mesh, VertexAttributeValues, Indices, PrimitiveTopology};
 use rapier2d::prelude::*;
 use rapier2d::na::Point2;
+use noise::{NoiseFn, Fbm};
+
 
 use crate::physics_resources::*;
 
@@ -31,7 +33,7 @@ struct AnimationTimer(Timer);
 
 impl Plugin for SetupPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup);
+        app.add_systems(Startup, (setup, terrain));
         app.add_systems(Update, (update, layer_checker, animate_sprite));
         app.add_systems(Update, inspect_mesh_data);
     }
@@ -142,7 +144,7 @@ fn setup(
             AnimationTimer(Timer::from_seconds(0.1, TimerMode::Repeating)),
         )]
     ));
-    commands.spawn((
+    /*commands.spawn((
         Wall,
         Pending,
         Mesh2d(meshes.add(Rectangle::new(100.0, 100.0))),
@@ -283,13 +285,92 @@ fn setup(
     commands.spawn((
         Floor,
         Mesh2d(meshes.add(Rectangle::new(500.0, 500.0))),
-        MeshMaterial2d(materials.add(Color::hsl(0.865, 0.195, 0.27))),
+        ///MeshMaterial2d(materials.add(Color::hsl(0.865, 0.195, 0.27))),
         Transform::from_xyz(
             0.0,
             0.0,
             -1.0,
         ),
-    ));
+        children![(
+            Sprite::from_image(asset_server.load("textures/sand.png")),
+            Transform::from_xyz(0.0, 0.0, 0.0)
+                .with_scale(Vec3::new(500.0/32.0, 500.0/32.0, 1.0)),
+        )],
+    ));*/
+}
+
+pub fn terrain(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    asset_server: Res<AssetServer>,
+) {
+    let fbm = Fbm::<noise::Perlin>::new(1);
+
+    let world_size_x = 50; // 50 tiles wide
+    let world_size_y = 50; // 50 tiles tall
+    let tile_size = 64.0;
+
+    for gx in 0..world_size_x {
+        for gy in 0..world_size_y {
+            let x = gx as f32 * tile_size;
+            let y = gy as f32 * tile_size;
+
+            // noise dla podłoża
+            let value = fbm.get([gx as f64 / 10.0, gy as f64 / 10.0]);
+
+            let texture_path = if value < -0.25 {
+                "textures/sand.png"
+            } else if value < 0.0 {
+                "textures/dirt.png"
+            } else if value < 0.25 {
+                "textures/path.png"
+            } else {
+                "textures/stone.png"
+            };
+
+            // spawn floor
+            let floor_entity = commands.spawn((
+                Floor,
+                Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
+                Transform::from_xyz(x, y, -1.0),
+                children![(
+                    Sprite::from_image(asset_server.load(texture_path)),
+                    Transform::from_xyz(0.0, 0.0, 0.0)
+                        .with_scale(Vec3::splat(1.0)),
+                )],
+            )).id();
+
+            // jeśli to stone → 50% szans na wall
+            if texture_path == "textures/stone.png" {
+                let wall_noise = fbm.get([gx as f64 / 5.0, gy as f64 / 5.0, 999.0]);
+                if wall_noise > 0.0 {
+                    commands.spawn((
+                        Wall,
+                        Pending,
+                        Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
+                        Transform::from_xyz(x, y, 0.0),
+                        children![(
+                            Sprite::from_image(asset_server.load("textures/main_wall.png")),
+                            Transform::from_xyz(0.0, 0.0, 0.0)
+                                .with_scale(Vec3::splat(1.0)),
+                        ),(
+                            Sprite::from_image(asset_server.load("textures/side_wall.png")),
+                            Transform::from_xyz(-tile_size, 0.0, 0.05)
+                                .with_scale(Vec3::splat(1.0)),
+                        ),(
+                            Sprite::from_image(asset_server.load("textures/up_wall.png")),
+                            Transform::from_xyz(0.0, tile_size, 0.05)
+                                .with_scale(Vec3::splat(1.0)),
+                        ),(
+                            Sprite::from_image(asset_server.load("textures/corner_wall.png")),
+                            Transform::from_xyz(-tile_size, tile_size, 0.1)
+                                .with_scale(Vec3::splat(1.0)),
+                        )],
+                    ));
+                }
+            }
+        }
+    }
 }
 
 fn update(
