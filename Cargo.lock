@@ -2771,6 +2771,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "noise",
+ "rand 0.8.5",
  "rapier2d",
 ]
 

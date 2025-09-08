@@ -7,3 +7,4 @@ edition = "2024"
 bevy = "0.16.1"
 rapier2d = { version = "0.25.0", features = [ "simd-stable" ]}
 noise = "0.8"
+rand = "0.8"

@@ -42,3 +42,37 @@ pub struct RigidBodyHandleComponent(pub RigidBodyHandle);
 
 #[derive(Resource)]
 pub struct ResPhysicsWork(pub bool);
+
+#[derive(Component)]
+pub struct AnimationIndices {
+    pub first: usize,
+    pub last: usize,
+}
+
+#[derive(Component, Deref, DerefMut)]
+pub struct AnimationTimer(pub Timer);
+
+#[derive(Component)]
+pub struct Player;
+
+#[derive(Component)]
+pub struct PlayerSprite;
+
+#[derive(Component)]
+pub struct WaterSprite;
+
+#[derive(Component)]
+pub struct Floor;
+
+#[derive(Component)]
+pub struct Wall;
+
+#[derive(Component)]
+pub struct Pending;
+
+#[derive(Component)]
+pub struct Monster;
+
+#[derive(Component)]
+pub struct MonsterSprite;
+
