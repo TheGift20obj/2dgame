@@ -171,13 +171,7 @@ pub fn terrain(
 
             // === wybór biomu ===
             let biome_val = biome_noise.get([gx as f64 / 128.0, gy as f64 / 128.0]);
-            let biome = if biome_val < -0.33 {
-                "snow"
-            } else if biome_val > 0.33 {
-                "evil"
-            } else {
-                "normal"
-            };
+            let biome = "normal";
 
             // === noise terenu w obrębie biomu ===
             let terrain_val = terrain_noise.get([gx as f64 / 15.0, gy as f64 / 15.0]);
