@@ -4,6 +4,47 @@ use crate::physics_resources::*;
 use rapier2d::prelude::*;
 use rapier2d::na::Point2;
 
+pub struct Item {
+    pub value: String,
+}
+
+pub struct Inventory {
+    pub items: Vec<Item>,
+    pub capacity: u32,
+}
+
+impl Inventory {
+    pub fn new() -> Self {
+        Self {
+            capacity: 16,
+            items: Vec::new(),
+        }
+    }
+}
+
+#[derive(Component)]
+pub struct PlayerData {
+    pub health: f32,
+    pub inventory: Inventory,
+}
+
+impl PlayerData {
+    pub fn new() -> Self {
+        Self {
+            health: 100.0,
+            inventory: Inventory::new(),
+        }
+    }
+
+    pub fn heal(&mut self, value: f32) {
+        self.health = (self.health + value).clamp(0.0, 100.0);
+    }
+
+    pub fn damage(&mut self, value: f32) {
+        self.health = (self.health - value).clamp(0.0, 100.0);
+    }
+}
+
 pub struct PlayerPlugin;
 
 impl Plugin for PlayerPlugin {
@@ -29,6 +70,7 @@ fn init(
         Camera2d,
         Player,
         Pending,
+        PlayerData::new(),
         Mesh2d(meshes.add(Rectangle::new(50.0, 25.0))),
         Transform::from_xyz(
             0.0,
