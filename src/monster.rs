@@ -9,7 +9,7 @@ pub struct MonsterAI {
     pub random_timer: Timer,
     pub random_dir: Vec2,
     pub action_timer: Timer,
-    pub action_couldown: Timer,
+    pub action_cooldown: Timer,
 }
 
 pub struct MonsterPlugin;
@@ -49,7 +49,7 @@ pub fn spawn_monsters(
                 random_timer: Timer::from_seconds(2.0, TimerMode::Repeating),
                 random_dir: Vec2::ZERO,
                 action_timer: Timer::from_seconds(0.25, TimerMode::Once),
-                action_couldown: Timer::from_seconds(2.0, TimerMode::Once),
+                action_cooldown: Timer::from_seconds(2.0, TimerMode::Once),
             },
             Pending,
             Mesh2d(meshes.add(Rectangle::new(40.0, 20.0))),
@@ -106,11 +106,11 @@ fn monster_ai(
                     ai.action_timer.reset();
                 } else if distance < action_distance {
                     ai.action_timer.tick(time.delta());
-                    if ai.action_timer.finished() && ai.action_couldown.finished() {
+                    if ai.action_timer.finished() && ai.action_cooldown.finished() {
                         player_data.damage(12.5);
                         player_data.can_heal.reset();
                         println!("You got damaged (-12.5 hp) you have now {}", player_data.health);
-                        ai.action_couldown.reset();
+                        ai.action_cooldown.reset();
                         ai.action_timer.reset();
                     }
                 } else {
