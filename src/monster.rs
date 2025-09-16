@@ -122,7 +122,7 @@ fn monster_ai(
                 }
             }
 
-            ai.action_couldown.tick(time.delta());
+            ai.action_cooldown.tick(time.delta());
 
             // ruch
             let dir = if ai.target_player {
