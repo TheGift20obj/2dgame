@@ -4,53 +4,12 @@ use crate::physics_resources::*;
 use rapier2d::prelude::*;
 use rapier2d::na::Point2;
 
-pub struct Item {
-    pub value: String,
-}
-
-pub struct Inventory {
-    pub items: Vec<Item>,
-    pub capacity: u32,
-}
-
-impl Inventory {
-    pub fn new() -> Self {
-        Self {
-            capacity: 16,
-            items: Vec::new(),
-        }
-    }
-}
-
-#[derive(Component)]
-pub struct PlayerData {
-    pub health: f32,
-    pub inventory: Inventory,
-}
-
-impl PlayerData {
-    pub fn new() -> Self {
-        Self {
-            health: 100.0,
-            inventory: Inventory::new(),
-        }
-    }
-
-    pub fn heal(&mut self, value: f32) {
-        self.health = (self.health + value).clamp(0.0, 100.0);
-    }
-
-    pub fn damage(&mut self, value: f32) {
-        self.health = (self.health - value).clamp(0.0, 100.0);
-    }
-}
-
 pub struct PlayerPlugin;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, init);
-        app.add_systems(Update, (update, animate_sprite));
+        app.add_systems(Update, (update, animate_sprite, try_heal));
     }
 }
 
@@ -171,4 +130,21 @@ fn update(
 
     rigidbody.set_linvel(vector![velocity.x, velocity.y], true);
     transform.translation.z = -(2048.0/64.0 + rigidbody.translation().y.round()/64.0) + 64.0;
+}
+
+fn try_heal(
+    time: Res<Time>,
+    mut player_query: Query<&mut PlayerData, (With<Player>, Without<Pending>)>
+) {
+    let mut player_data = if let Ok(mut d) = player_query.get_single_mut() {
+        d
+    } else {
+        return;
+    };
+
+    if player_data.can_heal.finished() && player_data.health < 100.0 {
+        player_data.heal(0.5);
+        println!("You regenerated (+0.5 hp) you have now {}", player_data.health);
+    }
+    player_data.can_heal.tick(time.delta());
 }

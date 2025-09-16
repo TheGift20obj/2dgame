@@ -8,6 +8,8 @@ pub struct MonsterAI {
     pub target_player: bool,
     pub random_timer: Timer,
     pub random_dir: Vec2,
+    pub action_timer: Timer,
+    pub action_couldown: Timer,
 }
 
 pub struct MonsterPlugin;
@@ -35,7 +37,6 @@ pub fn spawn_monsters(
         Vec2::new(500.0, -500.0),
         Vec2::new(-500.0, 500.0),
         Vec2::new(500.0, 500.0),
-        Vec2::new(0.0, 0.0),
     ];
 
     for pos in positions {
@@ -47,6 +48,8 @@ pub fn spawn_monsters(
                 target_player: false,
                 random_timer: Timer::from_seconds(2.0, TimerMode::Repeating),
                 random_dir: Vec2::ZERO,
+                action_timer: Timer::from_seconds(0.25, TimerMode::Once),
+                action_couldown: Timer::from_seconds(2.0, TimerMode::Once),
             },
             Pending,
             Mesh2d(meshes.add(Rectangle::new(40.0, 20.0))),
@@ -70,12 +73,12 @@ pub fn spawn_monsters(
 
 fn monster_ai(
     time: Res<Time>,
-    player_query: Query<&Transform, With<Player>>,
-    mut query: Query<(&mut MonsterAI, &mut RigidBodyHandleComponent, &mut Transform), (With<Monster>, Without<Player>)>,
+    mut player_query: Query<(&Transform, &mut PlayerData), (With<Player>, Without<Pending>)>,
+    mut query: Query<(&mut MonsterAI, &mut RigidBodyHandleComponent, &mut Transform), (With<Monster>, Without<Player>, Without<Pending>)>,
     mut rigid_bodies: ResMut<ResRigidBodySet>,
 ) {
-    let player_transform = if let Ok(t) = player_query.get_single() {
-        t
+    let (player_transform, mut player_data) = if let Ok((t, mut d)) = player_query.get_single_mut() {
+        (t, d)
     } else {
         return;
     };
@@ -83,6 +86,7 @@ fn monster_ai(
     let tile_size = 64.0;
     let see_distance = 5.0 * tile_size;
     let forget_distance = 10.0 * tile_size;
+    let action_distance = 0.75 * tile_size;
     let speed = 80.0; // wolniejsze
 
     for (mut ai, rb_handle, mut rb_transform) in &mut query {
@@ -93,19 +97,32 @@ fn monster_ai(
             );
             let player_pos = player_transform.translation.xy();
             let distance = monster_pos.distance(player_pos);
-
             // AI logika
             if ai.target_player {
                 if distance > forget_distance {
                     ai.target_player = false;
                     ai.random_dir = Vec2::new(rand_dir(), rand_dir());
                     ai.random_timer.reset();
+                    ai.action_timer.reset();
+                } else if distance < action_distance {
+                    ai.action_timer.tick(time.delta());
+                    if ai.action_timer.finished() && ai.action_couldown.finished() {
+                        player_data.damage(12.5);
+                        player_data.can_heal.reset();
+                        println!("You got damaged (-12.5 hp) you have now {}", player_data.health);
+                        ai.action_couldown.reset();
+                        ai.action_timer.reset();
+                    }
+                } else {
+                    ai.action_timer.reset();
                 }
             } else {
                 if distance < see_distance {
                     ai.target_player = true;
                 }
             }
+
+            ai.action_couldown.tick(time.delta());
 
             // ruch
             let dir = if ai.target_player {

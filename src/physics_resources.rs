@@ -76,3 +76,45 @@ pub struct Monster;
 #[derive(Component)]
 pub struct MonsterSprite;
 
+pub struct Item {
+    pub value: String,
+}
+
+pub struct Inventory {
+    pub items: Vec<Item>,
+    pub capacity: u32,
+}
+
+impl Inventory {
+    pub fn new() -> Self {
+        Self {
+            capacity: 16,
+            items: Vec::new(),
+        }
+    }
+}
+
+#[derive(Component)]
+pub struct PlayerData {
+    pub health: f32,
+    pub inventory: Inventory,
+    pub can_heal: Timer,
+}
+
+impl PlayerData {
+    pub fn new() -> Self {
+        Self {
+            health: 100.0,
+            inventory: Inventory::new(),
+            can_heal: Timer::from_seconds(3.14, TimerMode::Once)
+        }
+    }
+
+    pub fn heal(&mut self, value: f32) {
+        self.health = (self.health + value).clamp(0.0, 100.0);
+    }
+
+    pub fn damage(&mut self, value: f32) {
+        self.health = (self.health - value).clamp(0.0, 100.0);
+    }
+}
