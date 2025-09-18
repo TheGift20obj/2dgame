@@ -46,6 +46,9 @@ pub struct ColliderComponent(pub ColliderHandle);
 #[derive(Resource)]
 pub struct ResPhysicsWork(pub bool);
 
+#[derive(Resource)]
+pub struct GameStatus(pub bool);
+
 #[derive(Component)]
 pub struct AnimationIndices {
     pub first: usize,
@@ -57,6 +60,9 @@ pub struct AnimationTimer(pub Timer);
 
 #[derive(Component)]
 pub struct Player;
+
+#[derive(Component)]
+pub struct PlayerUIs;
 
 #[derive(Component)]
 pub struct PlayerSprite;
@@ -103,6 +109,9 @@ pub struct PlayerData {
     pub max_health: f32,
     pub inventory: Inventory,
     pub can_heal: Timer,
+    pub satamina: f32,
+    pub min_satamina: f32,
+    pub max_satamina: f32,
 }
 
 impl PlayerData {
@@ -111,15 +120,36 @@ impl PlayerData {
             health: 100.0,
             max_health: 100.0,
             inventory: Inventory::new(),
-            can_heal: Timer::from_seconds(3.14, TimerMode::Once)
+            can_heal: Timer::from_seconds(3.14, TimerMode::Once),
+            satamina: 360.0,
+            min_satamina: 25.0,
+            max_satamina: 360.0
         }
     }
 
     pub fn heal(&mut self, value: f32) {
-        self.health = (self.health + value).clamp(0.0, 100.0);
+        self.health = (self.health + value).clamp(0.0, self.max_health);
     }
 
     pub fn damage(&mut self, value: f32) {
-        self.health = (self.health - value).clamp(0.0, 100.0);
+        self.health = (self.health - value).clamp(0.0, self.max_health);
+    }
+
+    pub fn run(&mut self, value: f32) {
+        self.satamina = (self.satamina - value).clamp(0.0, self.max_satamina);
+    }
+
+    pub fn rest(&mut self, value: f32) {
+        self.satamina = (self.satamina + value).clamp(0.0, self.max_satamina);
+    }
+
+    pub fn fatigue(&mut self) -> f32 {
+        if self.satamina >= self.min_satamina {
+            1.0
+        } else {
+            // normalizujemy od 0 do min_satamina
+            let normalized = (self.min_satamina - self.satamina) / self.min_satamina;
+            -normalized.clamp(0.0, 0.75)+1.0 // upewniamy się, że nie wychodzi poza [0,1]
+        }
     }
 }

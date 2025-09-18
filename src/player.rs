@@ -8,18 +8,18 @@ pub struct PlayerPlugin;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, init);
-        app.add_systems(Update, (update, animate_sprite, try_heal));
+        //app.add_systems(Startup, init);
+        app.add_systems(Update, (update, animate_sprite, try_heal).run_if(|status: Res<GameStatus>| status.0));
     }
 }
 
-fn init(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    asset_server: Res<AssetServer>,
-    mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
-    images: Res<Assets<Image>>,
+pub fn init(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<ColorMaterial>>,
+    asset_server: &Res<AssetServer>,
+    texture_atlas_layouts: &mut ResMut<Assets<TextureAtlasLayout>>,
+    images: &Res<Assets<Image>>,
 ) {
     let texture = asset_server.load("textures/player_sprite.png");
     let layout = TextureAtlasLayout::from_grid(UVec2::splat(64), 2, 2, None, None);
@@ -103,12 +103,16 @@ fn animate_sprite(
 
 fn update(
     keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut query: Query<(&RigidBodyHandleComponent, &mut Transform), (With<Player>, Without<Pending>)>,
+    mut query: Query<(&RigidBodyHandleComponent, &mut Transform, &mut PlayerData), (With<Player>, Without<Pending>)>,
     mut rigid_bodies: ResMut<ResRigidBodySet>,
 ) {
-    let Ok((handle, mut transform)) = query.single_mut() else {
+    let Ok((handle, mut transform, mut player_data)) = query.single_mut() else {
         return;
     };
+
+    if !rigid_bodies.0.get_mut(handle.0).is_some() {
+        return;
+    }
 
     let mut rigidbody = rigid_bodies.0.get_mut(handle.0).unwrap();
 
@@ -120,7 +124,16 @@ fn update(
 
     let mut speed = 200.0;
 
-    if keyboard_input.pressed(KeyCode::ShiftLeft) { speed = 350.0; }
+    if keyboard_input.pressed(KeyCode::ShiftLeft) { 
+        player_data.run(1.0);
+        speed = 350.0; 
+    } else {
+        player_data.rest(0.25);
+    }
+
+    if player_data.satamina <= player_data.min_satamina {
+        speed *= player_data.fatigue();
+    }
 
     let velocity = if dir.length_squared() > 0.0 {
         dir.normalize() * speed
@@ -139,11 +152,13 @@ fn try_heal(
     mut commands: Commands,
     time: Res<Time>,
     mut player_query: Query<(Entity, &Transform, &mut PlayerData, &RigidBodyHandleComponent), (With<Player>, Without<Pending>)>,
+    mut player_ui_query: Query<Entity, With<PlayerUIs>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     asset_server: Res<AssetServer>,
     mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
-    images: Res<Assets<Image>>
+    images: Res<Assets<Image>>,
+    mut game_status: ResMut<GameStatus>,
 ) {
     let (entity, transform, mut player_data, handle) = if let Ok((e, t, mut d, rb_handle)) = player_query.get_single_mut() {
         (e, t, d, rb_handle)
@@ -154,6 +169,7 @@ fn try_heal(
     if player_data.can_heal.finished() && player_data.health < 100.0 && player_data.health > 0.0 {
         player_data.heal(0.05);
     } else if player_data.health == 0.0 {
+        game_status.0 = false;
         let mut colliders_clone = Vec::new();
         if let Some(rb) = rigid_bodies.0.get(handle.0) {
             for collider_handle in rb.colliders() {
@@ -173,8 +189,12 @@ fn try_heal(
             true, // usuwa powiązane collidery
         );
         commands.entity(entity).despawn_recursive();
+        for ui_entity in player_ui_query {
+            commands.entity(ui_entity).despawn_recursive();
+        }
+        crate::menu_ui::setup_ui(&mut commands, &asset_server);
         //commands.spawn((Camera2d, Transform {translation: transform.translation, ..default()}));
-        let texture = asset_server.load("textures/player_sprite.png");
+        /*let texture = asset_server.load("textures/player_sprite.png");
         let layout = TextureAtlasLayout::from_grid(UVec2::splat(64), 2, 2, None, None);
         let texture_atlas_layout = texture_atlas_layouts.add(layout);
         let animation_indices = AnimationIndices { first: 0, last: 3 };
@@ -202,7 +222,7 @@ fn try_heal(
                 AnimationTimer(Timer::from_seconds(0.1, TimerMode::Repeating)),
                 PlayerSprite,
             )]
-        ));
+        ));*/
         return;
     }
     player_data.can_heal.tick(time.delta());

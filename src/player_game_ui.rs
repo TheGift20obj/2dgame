@@ -7,19 +7,22 @@ pub struct HudPlugin;
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app
-            .add_systems(Startup, (spawn_health_bar, spawn_inventory_bar))
-            .add_systems(Update, update_health_bar);
+            //.add_systems(Startup, (spawn_health_bar, spawn_inventory_bar))
+            .add_systems(Update, (update_health_bar, update_satamina_bar).chain().run_if(|status: Res<GameStatus>| status.0));
     }
 }
 
 #[derive(Component)]
 struct HealthBar;
 
+#[derive(Component)]
+struct SataminaBar;
 
-fn spawn_health_bar(mut commands: Commands) {
+pub fn spawn_health_bar(commands: &mut Commands) {
     // Kontener paska zdrowia
     commands
         .spawn((
+            PlayerUIs,
             Node {
                 position_type: PositionType::Absolute,
                 top: Val::Px(10.0),
@@ -42,12 +45,39 @@ fn spawn_health_bar(mut commands: Commands) {
                 HealthBar,
             ));
         });
+
+    commands
+        .spawn((
+            PlayerUIs,
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(40.0),
+                left: Val::Px(10.0),
+                width: Val::Px(175.0),
+                height: Val::Px(10.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.1, 0.1, 0.1)), // tło
+        ))
+        .with_children(|builder| {
+            // Pasek HP
+            builder.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.0, 0.8, 0.0)),
+                SataminaBar,
+            ));
+        });
 }
 
-fn spawn_inventory_bar(mut commands: Commands) {
+pub fn spawn_inventory_bar(commands: &mut Commands) {
     // Kontener główny: pozycjonowany absolutnie, na dole, pełna szerokość
     commands
         .spawn((
+            PlayerUIs,
             Node {
                 position_type: PositionType::Absolute,
                 bottom: Val::Px(20.0),
@@ -100,6 +130,22 @@ fn update_health_bar(
 
     if let Ok(mut bar) = query.get_single_mut() {
         let percent = (player_data.health / player_data.max_health).clamp(0.0, 1.0) * 100.0;
+        bar.width = Val::Percent(percent);
+    }
+}
+
+fn update_satamina_bar(
+    mut player_query: Query<&PlayerData, (With<Player>, Without<Pending>)>,
+    mut query: Query<&mut Node, With<SataminaBar>>,
+) {
+    let player_data = if let Ok(d) = player_query.get_single_mut() {
+        d
+    } else {
+        return;
+    };
+
+    if let Ok(mut bar) = query.get_single_mut() {
+        let percent = (player_data.satamina / player_data.max_satamina).clamp(0.0, 1.0) * 100.0;
         bar.width = Val::Percent(percent);
     }
 }
