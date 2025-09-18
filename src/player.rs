@@ -133,18 +133,79 @@ fn update(
 }
 
 fn try_heal(
+    mut rigid_bodies: ResMut<ResRigidBodySet>,
+    mut colliders: ResMut<ResColliderSet>,
+    mut island_manager: ResMut<ResIslandManager>,
+    mut commands: Commands,
     time: Res<Time>,
-    mut player_query: Query<&mut PlayerData, (With<Player>, Without<Pending>)>
+    mut player_query: Query<(Entity, &Transform, &mut PlayerData, &RigidBodyHandleComponent), (With<Player>, Without<Pending>)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    asset_server: Res<AssetServer>,
+    mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
+    images: Res<Assets<Image>>
 ) {
-    let mut player_data = if let Ok(mut d) = player_query.get_single_mut() {
-        d
+    let (entity, transform, mut player_data, handle) = if let Ok((e, t, mut d, rb_handle)) = player_query.get_single_mut() {
+        (e, t, d, rb_handle)
     } else {
         return;
     };
 
-    if player_data.can_heal.finished() && player_data.health < 100.0 {
+    if player_data.can_heal.finished() && player_data.health < 100.0 && player_data.health > 0.0 {
         player_data.heal(0.5);
         println!("You regenerated (+0.5 hp) you have now {}", player_data.health);
+    } else if player_data.health == 0.0 {
+        let mut colliders_clone = Vec::new();
+        if let Some(rb) = rigid_bodies.0.get(handle.0) {
+            for collider_handle in rb.colliders() {
+                colliders_clone.push(collider_handle.clone());
+            }
+        }
+
+        for collider_handle in colliders_clone {
+            colliders.0.remove(collider_handle, &mut island_manager.0, &mut rigid_bodies.0, true);
+        }
+        rigid_bodies.0.remove(
+            handle.0,
+            &mut island_manager.0,
+            &mut colliders.0,
+            &mut ImpulseJointSet::new(),
+            &mut MultibodyJointSet::new(),
+            true, // usuwa powiązane collidery
+        );
+        commands.entity(entity).despawn_recursive();
+        //commands.spawn((Camera2d, Transform {translation: transform.translation, ..default()}));
+        println!("Game over!");
+        let texture = asset_server.load("textures/player_sprite.png");
+        let layout = TextureAtlasLayout::from_grid(UVec2::splat(64), 2, 2, None, None);
+        let texture_atlas_layout = texture_atlas_layouts.add(layout);
+        let animation_indices = AnimationIndices { first: 0, last: 3 };
+        commands.spawn((
+            Camera2d,
+            Player,
+            Pending,
+            PlayerData::new(),
+            Mesh2d(meshes.add(Rectangle::new(50.0, 25.0))),
+            Transform::from_xyz(
+                0.0,
+                0.0,
+                1.0,
+            ),
+            children![(
+                Sprite::from_atlas_image(
+                    texture,
+                    TextureAtlas {
+                        layout: texture_atlas_layout,
+                        index: animation_indices.first,
+                    },
+                ),
+                Transform::from_xyz(0.0, 43.0, 0.0).with_scale(Vec3::splat(2.5)),
+                animation_indices,
+                AnimationTimer(Timer::from_seconds(0.1, TimerMode::Repeating)),
+                PlayerSprite,
+            )]
+        ));
+        return;
     }
     player_data.can_heal.tick(time.delta());
 }

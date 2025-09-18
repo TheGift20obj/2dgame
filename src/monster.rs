@@ -77,10 +77,11 @@ fn monster_ai(
     mut query: Query<(&mut MonsterAI, &mut RigidBodyHandleComponent, &mut Transform), (With<Monster>, Without<Player>, Without<Pending>)>,
     mut rigid_bodies: ResMut<ResRigidBodySet>,
 ) {
-    let (player_transform, mut player_data) = if let Ok((t, mut d)) = player_query.get_single_mut() {
-        (t, d)
+    let (player_transform, mut player_data_some): (Transform, Option<Mut<PlayerData>>) =
+    if let Ok((t, mut d)) = player_query.get_single_mut() {
+        (t.clone(), Some(d)) // <- klonujemy Transform, żeby mieć wartość
     } else {
-        return;
+        (Transform::default(), None)
     };
 
     let tile_size = 64.0;
@@ -99,25 +100,32 @@ fn monster_ai(
             let distance = monster_pos.distance(player_pos);
             // AI logika
             if ai.target_player {
-                if distance > forget_distance {
+                if let Some(ref mut player_data) = player_data_some {
+                    if distance > forget_distance {
+                        ai.target_player = false;
+                        ai.random_dir = Vec2::new(rand_dir(), rand_dir());
+                        ai.random_timer.reset();
+                        ai.action_timer.reset();
+                    } else if distance < action_distance {
+                        ai.action_timer.tick(time.delta());
+                        if ai.action_timer.finished() && ai.action_cooldown.finished() {
+                            player_data.damage(12.5);
+                            player_data.can_heal.reset();
+                            println!("You got damaged (-12.5 hp) you have now {}", player_data.health);
+                            ai.action_cooldown.reset();
+                            ai.action_timer.reset();
+                        }
+                    } else {
+                        ai.action_timer.reset();
+                    }
+                } else {
                     ai.target_player = false;
                     ai.random_dir = Vec2::new(rand_dir(), rand_dir());
                     ai.random_timer.reset();
                     ai.action_timer.reset();
-                } else if distance < action_distance {
-                    ai.action_timer.tick(time.delta());
-                    if ai.action_timer.finished() && ai.action_cooldown.finished() {
-                        player_data.damage(12.5);
-                        player_data.can_heal.reset();
-                        println!("You got damaged (-12.5 hp) you have now {}", player_data.health);
-                        ai.action_cooldown.reset();
-                        ai.action_timer.reset();
-                    }
-                } else {
-                    ai.action_timer.reset();
                 }
             } else {
-                if distance < see_distance {
+                if distance < see_distance && player_data_some.is_some() {
                     ai.target_player = true;
                 }
             }

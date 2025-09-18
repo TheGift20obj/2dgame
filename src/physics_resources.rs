@@ -40,6 +40,9 @@ pub struct ResQueryPipeline(pub QueryPipeline);
 #[derive(Component)]
 pub struct RigidBodyHandleComponent(pub RigidBodyHandle);
 
+#[derive(Component)]
+pub struct ColliderComponent(pub ColliderHandle);
+
 #[derive(Resource)]
 pub struct ResPhysicsWork(pub bool);
 
