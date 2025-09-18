@@ -109,9 +109,8 @@ fn monster_ai(
                     } else if distance < action_distance {
                         ai.action_timer.tick(time.delta());
                         if ai.action_timer.finished() && ai.action_cooldown.finished() {
-                            player_data.damage(12.5);
+                            player_data.damage(20.0);
                             player_data.can_heal.reset();
-                            println!("You got damaged (-12.5 hp) you have now {}", player_data.health);
                             ai.action_cooldown.reset();
                             ai.action_timer.reset();
                         }

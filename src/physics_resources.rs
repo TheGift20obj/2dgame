@@ -100,6 +100,7 @@ impl Inventory {
 #[derive(Component)]
 pub struct PlayerData {
     pub health: f32,
+    pub max_health: f32,
     pub inventory: Inventory,
     pub can_heal: Timer,
 }
@@ -108,6 +109,7 @@ impl PlayerData {
     pub fn new() -> Self {
         Self {
             health: 100.0,
+            max_health: 100.0,
             inventory: Inventory::new(),
             can_heal: Timer::from_seconds(3.14, TimerMode::Once)
         }

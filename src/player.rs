@@ -152,8 +152,7 @@ fn try_heal(
     };
 
     if player_data.can_heal.finished() && player_data.health < 100.0 && player_data.health > 0.0 {
-        player_data.heal(0.5);
-        println!("You regenerated (+0.5 hp) you have now {}", player_data.health);
+        player_data.heal(0.05);
     } else if player_data.health == 0.0 {
         let mut colliders_clone = Vec::new();
         if let Some(rb) = rigid_bodies.0.get(handle.0) {
@@ -175,7 +174,6 @@ fn try_heal(
         );
         commands.entity(entity).despawn_recursive();
         //commands.spawn((Camera2d, Transform {translation: transform.translation, ..default()}));
-        println!("Game over!");
         let texture = asset_server.load("textures/player_sprite.png");
         let layout = TextureAtlasLayout::from_grid(UVec2::splat(64), 2, 2, None, None);
         let texture_atlas_layout = texture_atlas_layouts.add(layout);
