@@ -16,16 +16,16 @@ impl Plugin for ObjectsLoaderPlugin {
 fn inspect(
     mut commands: Commands,
     meshes: Res<Assets<Mesh>>,
-    query: Query<(Entity, &Mesh2d, &Transform, Option<&Player>, Option<&Wall>), With<Pending>>,
+    query: Query<(Entity, &Mesh2d, &Transform, Option<&Player>, Option<&Wall>, Option<&Floor>), With<Pending>>,
     mut rigid_bodies: ResMut<ResRigidBodySet>,
     mut colliders: ResMut<ResColliderSet>,
 ) {
-    for (entity, mesh_handle, transform, player, wall) in &query {
+    for (entity, mesh_handle, transform, player, wall, floor) in &query {
         if let Some(mesh) = meshes.get(&mesh_handle.0) {
             if let Some((vertices, indices)) = handle_mesh(mesh, transform) {
                 let rigid_body = if player.is_some() {
                     RigidBodyBuilder::dynamic().soft_ccd_prediction(0.0).lock_rotations()
-                } else if wall.is_some() {
+                } else if wall.is_some() || floor.is_some() {
                     RigidBodyBuilder::fixed()
                 } else {
                     RigidBodyBuilder::dynamic().soft_ccd_prediction(0.0).lock_rotations()

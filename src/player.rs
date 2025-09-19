@@ -4,6 +4,7 @@ use crate::physics_resources::*;
 use rapier2d::prelude::*;
 use rapier2d::na::Point2;
 
+use crate::terrain::{WORLD_SIZE, TILE_SIZE};
 pub struct PlayerPlugin;
 
 impl Plugin for PlayerPlugin {
@@ -142,7 +143,7 @@ fn update(
     };
 
     rigidbody.set_linvel(vector![velocity.x, velocity.y], true);
-    transform.translation.z = -(2048.0/64.0 + rigidbody.translation().y.round()/64.0) + 64.0;
+    transform.translation.z = -(((WORLD_SIZE as f32*TILE_SIZE)/2.0)/64.0 + rigidbody.translation().y.round()/64.0) + 64.0;
 }
 
 fn try_heal(

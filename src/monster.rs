@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use rapier2d::prelude::*;
 
 use crate::physics_resources::*;
+use crate::terrain::{WORLD_SIZE, TILE_SIZE};
 
 #[derive(Component)]
 pub struct MonsterAI {
@@ -155,7 +156,7 @@ fn monster_ai(
                     rb_transform.scale.x *= -1.0;
                 }
             }
-            rb_transform.translation.z = -(2048.0/64.0 + rigid_body.translation().y.round()/64.0) + 64.0;
+            rb_transform.translation.z = -(((WORLD_SIZE as f32*TILE_SIZE)/2.0)/64.0 + rigid_body.translation().y.round()/64.0) + 64.0;
         }
     }
 }
