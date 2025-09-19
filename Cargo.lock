@@ -768,6 +768,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_light_2d"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1bffff22dfcac2163b454fec19f4f75b5da0400c26ed2efbd72450e9ee3331b6"
+dependencies = [
+ "bevy",
+ "smallvec",
+]
+
+[[package]]
 name = "bevy_log"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2770,6 +2780,7 @@ name = "mgla_2d_game"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_light_2d",
  "noise",
  "rand 0.8.5",
  "rapier2d",

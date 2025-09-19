@@ -18,10 +18,13 @@ use player::PlayerPlugin;
 use terrain::TerrainGenerationPlugin;
 use loader::ObjectsLoaderPlugin;
 
+use bevy_light_2d::prelude::*;
+
 fn main() {
     let mut app = App::new();
     app.add_plugins((
         DefaultPlugins.set(ImagePlugin::default_nearest()),
+        Light2dPlugin,
         MenuPlugin,
         HudPlugin,
         PhysicsPlugin,

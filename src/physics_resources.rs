@@ -74,6 +74,12 @@ pub struct WaterSprite;
 pub struct Floor;
 
 #[derive(Component)]
+pub struct Fog;
+
+#[derive(Component)]
+pub struct FogHalo;
+
+#[derive(Component)]
 pub struct Wall;
 
 #[derive(Component)]

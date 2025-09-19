@@ -88,7 +88,7 @@ fn monster_ai(
     let tile_size = 64.0;
     let see_distance = 5.0 * tile_size;
     let forget_distance = 10.0 * tile_size;
-    let action_distance = 0.75 * tile_size;
+    let action_distance = 1.25 * tile_size;
     let speed = 80.0; // wolniejsze
 
     for (mut ai, rb_handle, mut rb_transform) in &mut query {

@@ -7,12 +7,14 @@ use std::collections::HashSet;
 use rapier2d::prelude::ImpulseJointSet;
 use rapier2d::prelude::MultibodyJointSet;
 
+use bevy_light_2d::prelude::*;
+
 #[derive(Resource, Default)]
 pub struct TerrainMap {
-    pub generated: HashSet<IVec2>, // np. współrzędne kafelków
+    pub generated: HashSet<IVec2>,
 }
 
-pub const WORLD_SIZE: i32 = 16;   // liczba kafelków widocznych w danym "obszarze"
+pub const WORLD_SIZE: i32 = 96;   // liczba kafelków widocznych w danym "obszarze"
 pub const TILE_SIZE: f32 = 64.0;
 
 pub struct TerrainGenerationPlugin;
@@ -32,6 +34,8 @@ fn init_terrain(
     asset_server: Res<AssetServer>,
     mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
     mut terrain_map: ResMut<TerrainMap>,
+    query_non_phys: Query<(Entity, &Transform, Option<&Fog>, &Children), (Or<(With<Floor>, With<Wall>)>, Without<RigidBodyHandleComponent>)>,
+    mut sprite_query: Query<&mut Sprite, With<WaterSprite>>,
 ) {
     let center = IVec2::ZERO;
     generate_area(
@@ -40,6 +44,15 @@ fn init_terrain(
         &asset_server,
         &mut texture_atlas_layouts,
         &mut terrain_map,
+        center,
+        &query_non_phys,
+        &mut sprite_query,
+    );
+    generate_halo(
+        &mut commands,
+        &mut meshes,
+        &asset_server,
+        &mut texture_atlas_layouts,
         center,
     );
 }
@@ -51,15 +64,21 @@ fn update_terrain(
     mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
     mut terrain_map: ResMut<TerrainMap>,
     player_q: Query<&Transform, With<Player>>,
-
+    mut sprite_query: Query<&mut Sprite, With<WaterSprite>>,
     // do usuwania fizyki
     mut colliders: ResMut<ResColliderSet>,
     mut rigid_bodies: ResMut<ResRigidBodySet>,
     mut island_manager: ResMut<ResIslandManager>,
     query_phys: Query<(Entity, &Transform, &RigidBodyHandleComponent), Or<(With<Floor>, With<Wall>)>>,
-    query_non_phys: Query<(Entity, &Transform), (Or<(With<Floor>, With<Wall>)>, Without<RigidBodyHandleComponent>)>,
+    query_non_phys: Query<(Entity, &Transform, Option<&Fog>, &Children), (Or<(With<Floor>, With<Wall>)>, Without<RigidBodyHandleComponent>)>,
+    mut halo_query: Query<&mut Transform, (With<FogHalo>, Without<Floor>, Without<Wall>, Without<Player>)>,
 ) {
     let player_transform = if let Ok(d) = player_q.get_single() {
+        d
+    } else {
+        return;
+    };
+    let mut halo_transform = if let Ok(mut d) = halo_query.get_single_mut() {
         d
     } else {
         return;
@@ -69,7 +88,9 @@ fn update_terrain(
         (player_pos.x / TILE_SIZE).round() as i32 * TILE_SIZE as i32,
         (player_pos.y / TILE_SIZE).round() as i32 * TILE_SIZE as i32,
     );
-
+    halo_transform.translation.x = center.x as f32;
+    halo_transform.translation.y = center.y as f32;
+    halo_transform.translation.z = player_transform.translation.z+3.14;
     // === Dodaj nowy teren ===
     generate_area(
         &mut commands,
@@ -78,6 +99,8 @@ fn update_terrain(
         &mut texture_atlas_layouts,
         &mut terrain_map,
         center,
+        &query_non_phys,
+        &mut sprite_query,
     );
 
     // === Usuń stary teren ===
@@ -86,7 +109,8 @@ fn update_terrain(
     for &pos in terrain_map.generated.iter() {
         let dx = pos.x - center.x;
         let dy = pos.y - center.y;
-        if dx * dx + dy * dy > radius * radius {
+        let r = (dx * dx + dy * dy);
+        if r > (radius*radius)/25 {
             to_remove.push(pos);
         }
     }
@@ -118,7 +142,7 @@ fn update_terrain(
             commands.entity(entity).despawn_recursive();
         }
 
-        for (entity, transform) in query_non_phys.iter() {
+        for (entity, transform, _, _) in query_non_phys.iter() {
             if !(transform.translation.x as i32 == pos.x && transform.translation.y as i32 == pos.y) {
                 continue;
             }
@@ -136,17 +160,20 @@ fn generate_area(
     texture_atlas_layouts: &mut ResMut<Assets<TextureAtlasLayout>>,
     terrain_map: &mut ResMut<TerrainMap>,
     center: IVec2,
+    query_non_phys: &Query<(Entity, &Transform, Option<&Fog>, &Children), (Or<(With<Floor>, With<Wall>)>, Without<RigidBodyHandleComponent>)>,
+    sprite_query: &mut Query<&mut Sprite, With<WaterSprite>>,
 ) {
     let terrain_noise = Fbm::<Perlin>::new(921925);
     let path_noise = Fbm::<Perlin>::new(5342756);
     let biome_noise = Fbm::<Perlin>::new(2683467); // nowy noise dla biomów
 
-    let world_size_x = WORLD_SIZE;
-    let world_size_y = WORLD_SIZE;
+    let world_size_x = WORLD_SIZE/3;
+    let world_size_y = WORLD_SIZE/3;
     let tile_size = TILE_SIZE;
     let radius = WORLD_SIZE as f32;
     let x_offset = (world_size_x as f32 * tile_size) / 2.0;
     let y_offset = (world_size_y as f32 * tile_size) / 2.0;
+    let g_offset = (radius * tile_size) / 2.0;
 
     // atlas wody
     let water_texture = asset_server.load("textures/water.png");
@@ -163,7 +190,55 @@ fn generate_area(
             let y = gy as f32 * tile_size - y_offset + center.y as f32;
             
             let pos = IVec2::new(x as i32, y as i32);
+            let t = ((dist2*dist2) / (radius-16.0).powi(2)).clamp(0.0, 1.0);
+            let k = 0.25; // <1 → szybszy wzrost przezroczystości
+            let transp = t.powf(k);
             if terrain_map.generated.contains(&pos) {
+                if dist2*dist2 < 0.0 {
+                    for (entity, transform, fog, _) in query_non_phys.iter() {
+                        if fog.is_some() {
+                            if !(transform.translation.x as i32 == pos.x && transform.translation.y as i32 == pos.y) {
+                                continue;
+                            }
+                            commands.entity(entity).despawn_recursive();
+                        }
+                    }
+                } else {
+                    let mut exits = false;
+                    for (entity, transform, fog, children) in query_non_phys.iter() {
+                        if fog.is_some() {
+                            if (transform.translation.x as i32 == pos.x && transform.translation.y as i32 == pos.y) {
+                                exits = true;
+                                for child in children.iter() {
+                                    if let Ok(mut sprite) = sprite_query.get_mut(child) {
+                                        sprite.color = Color::srgba(0.25, 0.25, 0.25, transp);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if !exits {
+                        commands.spawn((
+                            Floor, Fog,
+                            Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
+                            Transform::from_xyz(x, y, 3.14 + -(g_offset/64.0 + y/64.0)+64.0),
+                            children![(
+                                {
+                                    let mut s = Sprite::from_atlas_image(
+                                        water_texture.clone(),
+                                        TextureAtlas { layout: water_atlas.clone(), index: 0 },
+                                    );
+                                    s.color = Color::srgba(0.25, 0.25, 0.25, transp); // odcień szarości + alfa
+                                    s
+                                },
+                                Transform::from_scale(Vec3::splat(tile_size / 32.0)),
+                                AnimationIndices { first: 0, last: 3 },
+                                AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
+                                WaterSprite,
+                            )],
+                        ));
+                    }
+                }
                 continue;
             }
 
@@ -229,7 +304,7 @@ fn generate_area(
                     Floor,
                     Pending,
                     Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
-                    Transform::from_xyz(x, y, -3.0 + -(y_offset/64.0 + y/64.0)+64.0),
+                    Transform::from_xyz(x, y, -3.0 + -(g_offset/64.0 + y/64.0)+64.0),
                     children![(
                         Sprite::from_atlas_image(
                             water_texture.clone(),
@@ -248,7 +323,7 @@ fn generate_area(
                 commands.spawn((
                     Floor,
                     Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
-                    Transform::from_xyz(x, y, -3.0 + -(y_offset/64.0 + y/64.0)+64.0),
+                    Transform::from_xyz(x, y, -3.0 + -(g_offset/64.0 + y/64.0)+64.0),
                     children![(
                         Sprite::from_image(asset_server.load(texture_path)),
                         Transform::from_scale(Vec3::splat(tile_size / 32.0)),
@@ -260,22 +335,110 @@ fn generate_area(
             if texture_path == "textures/stone.png" || texture_path == "textures/evil_stone.png" {
                 let wall_val = terrain_noise.get([(x / tile_size) as f64 / 6.0, (y / tile_size) as f64 / 6.0, 999.0]);
                 if wall_val > 0.0 {
-                    spawn_wall(commands, meshes, asset_server, x, y, tile_size, y_offset);
+                    spawn_wall(commands, meshes, asset_server, x, y, tile_size, g_offset);
+                }
+            }
+
+            if dist2*dist2 >= 0.0 {
+                let mut exits = false;
+                for (entity, transform, fog, children) in query_non_phys.iter() {
+                    if fog.is_some() {
+                        if (transform.translation.x as i32 == pos.x && transform.translation.y as i32 == pos.y) {
+                            exits = true;
+                            for child in children.iter() {
+                                if let Ok(mut sprite) = sprite_query.get_mut(child) {
+                                    sprite.color = Color::srgba(0.25, 0.25, 0.25, transp);
+                                }
+                            }
+                        }
+                    }
+                }
+                if !exits {
+                    commands.spawn((
+                        Floor, Fog,
+                        Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
+                        Transform::from_xyz(x, y, 3.14 + -(g_offset/64.0 + y/64.0)+64.0),
+                        children![(
+                            {
+                                let mut s = Sprite::from_atlas_image(
+                                    water_texture.clone(),
+                                    TextureAtlas { layout: water_atlas.clone(), index: 0 },
+                                );
+                                s.color = Color::srgba(0.25, 0.25, 0.25, transp); // odcień szarości + alfa
+                                s
+                            },
+                            Transform::from_scale(Vec3::splat(tile_size / 32.0)),
+                            AnimationIndices { first: 0, last: 3 },
+                            AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
+                            WaterSprite,
+                        )],
+                    ));
+                }
+            } else {
+                for (entity, transform, fog, _) in query_non_phys.iter() {
+                    if fog.is_some() {
+                        if !(transform.translation.x as i32 == pos.x && transform.translation.y as i32 == pos.y) {
+                            continue;
+                        }
+                        commands.entity(entity).despawn_recursive();
+                    }
                 }
             }
         }
     }
+}
 
-    // === barierka wokół świata ===
-    /*for gx in 0..world_size_x {
-        for gy in 0..world_size_y {
-            if gx == 0 || gy == 0 || gx == world_size_x - 1 || gy == world_size_y - 1 {
-                let x = gx as f32 * tile_size - x_offset;
-                let y = gy as f32 * tile_size - y_offset;
-                spawn_wall(commands, meshes, asset_server, x, y, tile_size, y_offset);
+
+fn generate_halo(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    asset_server: &Res<AssetServer>,
+    texture_atlas_layouts: &mut ResMut<Assets<TextureAtlasLayout>>,
+    center: IVec2,
+) {
+    let world_size_x = WORLD_SIZE/3;
+    let world_size_y = WORLD_SIZE/3;
+    let tile_size = TILE_SIZE;
+    let radius = WORLD_SIZE as f32;
+    let x_offset = (world_size_x as f32 * tile_size) / 2.0;
+    let y_offset = (world_size_y as f32 * tile_size) / 2.0;
+    let g_offset = (radius * tile_size) / 2.0;
+
+    // atlas wody
+    let water_texture = asset_server.load("textures/water.png");
+    let water_layout = TextureAtlasLayout::from_grid(UVec2::splat(32), 2, 2, None, None);
+    let water_atlas = texture_atlas_layouts.add(water_layout);
+
+    commands.spawn((FogHalo, Transform::from_xyz(0.0, 0.0, 3.14), InheritedVisibility::default())).with_children(|parent| {
+        for gx in 0..world_size_x {
+            for gy in 0..world_size_y {
+                let dist2 = ((gx as f32 - x_offset/tile_size) * (gx as f32 - x_offset/tile_size) + (gy as f32 - y_offset/tile_size) * (gy as f32 - y_offset/tile_size)) as f32;
+                if !(dist2*dist2 <= radius * radius) {
+                    let x = gx as f32 * tile_size - x_offset + center.x as f32;
+                    let y = gy as f32 * tile_size - y_offset + center.y as f32;
+
+                    parent.spawn((
+                        Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
+                        Transform::from_xyz(x, y, -(g_offset/64.0 + y/64.0)+64.0),
+                        children![(
+                            {
+                                let mut s = Sprite::from_atlas_image(
+                                    water_texture.clone(),
+                                    TextureAtlas { layout: water_atlas.clone(), index: 0 },
+                                );
+                                s.color = Color::srgba(0.25, 0.25, 0.25, 1.0); // odcień szarości + alfa
+                                s
+                            },
+                            Transform::from_scale(Vec3::splat(tile_size / 32.0)),
+                            AnimationIndices { first: 0, last: 3 },
+                            AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
+                            WaterSprite,
+                        )],
+                    ));
+                }
             }
         }
-    }*/
+    });
 }
 
 fn animate_sprite(

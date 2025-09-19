@@ -4,6 +4,8 @@ use crate::physics_resources::*;
 use rapier2d::prelude::*;
 use rapier2d::na::Point2;
 
+use bevy_light_2d::prelude::*;
+
 use crate::terrain::{WORLD_SIZE, TILE_SIZE};
 pub struct PlayerPlugin;
 
@@ -28,6 +30,15 @@ pub fn init(
     let animation_indices = AnimationIndices { first: 0, last: 3 };
     commands.spawn((
         Camera2d,
+        Light2d{ambient_light: AmbientLight2d {
+            color: Color::srgba(0.375, 0.375, 0.375, 1.0), // czarne otoczenie
+            brightness: 0.95, // 0.0 = totalna ciemność, 1.0 = pełne światło
+        }},
+        PointLight2d {
+            intensity: 0.375,
+            radius: 256.0,
+            ..default()
+        },
         Player,
         Pending,
         PlayerData::new(),
