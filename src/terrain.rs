@@ -142,7 +142,7 @@ fn generate_area(
     let world_size_x = WORLD_SIZE;
     let world_size_y = WORLD_SIZE;
     let tile_size = TILE_SIZE;
-
+    let radius = world_radius as f32;
     let x_offset = (world_size_x as f32 * tile_size) / 2.0;
     let y_offset = (world_size_y as f32 * tile_size) / 2.0;
 
