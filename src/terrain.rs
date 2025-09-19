@@ -153,6 +153,10 @@ fn generate_area(
 
     for gx in 0..world_size_x {
         for gy in 0..world_size_y {
+            let dist2 = (gx * gx + gy * gy) as f32;
+            if !(dist2 <= radius * radius) {
+                continue;
+            }
             let x = gx as f32 * tile_size - x_offset + center.x as f32;
             let y = gy as f32 * tile_size - y_offset + center.y as f32;
             
