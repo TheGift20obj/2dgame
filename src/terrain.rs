@@ -84,7 +84,9 @@ fn update_terrain(
     let radius = (TILE_SIZE as i32 * WORLD_SIZE) / 2;
     let mut to_remove = Vec::new();
     for &pos in terrain_map.generated.iter() {
-        if (pos.x - center.x).abs() > radius || (pos.y - center.y).abs() > radius {
+        let dx = pos.x - center.x;
+        let dy = pos.y - center.y;
+        if dx * dx + dy * dy > radius * radius {
             to_remove.push(pos);
         }
     }
@@ -142,7 +144,7 @@ fn generate_area(
     let world_size_x = WORLD_SIZE;
     let world_size_y = WORLD_SIZE;
     let tile_size = TILE_SIZE;
-    let radius = world_radius as f32;
+    let radius = WORLD_SIZE as f32;
     let x_offset = (world_size_x as f32 * tile_size) / 2.0;
     let y_offset = (world_size_y as f32 * tile_size) / 2.0;
 
@@ -153,8 +155,8 @@ fn generate_area(
 
     for gx in 0..world_size_x {
         for gy in 0..world_size_y {
-            let dist2 = (gx * gx + gy * gy) as f32;
-            if !(dist2 <= radius * radius) {
+            let dist2 = ((gx as f32 - x_offset/tile_size) * (gx as f32 - x_offset/tile_size) + (gy as f32 - y_offset/tile_size) * (gy as f32 - y_offset/tile_size)) as f32;
+            if !(dist2*dist2 <= radius * radius) {
                 continue;
             }
             let x = gx as f32 * tile_size - x_offset + center.x as f32;
