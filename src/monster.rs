@@ -34,7 +34,7 @@ impl Plugin for MonsterPlugin {
            .insert_resource(MonsterConfig {
                min_spawn_distance: 20.0,   // spawn 20 kratek
                max_despawn_distance: 30.0, // despawn 30 kratek
-               max_monsters: 25,
+               max_monsters: 50,
                world_size_x: (WORLD_SIZE/3) as usize,
                world_size_y: (WORLD_SIZE/3) as usize,
                tile_size: 64.0,
@@ -54,6 +54,7 @@ fn spawn_monsters_system(
     mut meshes: ResMut<Assets<Mesh>>,
     player_query: Query<&Transform, With<Player>>,
     existing_monsters: Query<Entity, With<Monster>>,
+    bodies_query: Query<(&Transform), (Or<(With<Wall>, With<Floor>)>, Without<Pending>, With<RigidBodyHandleComponent>)>,
     config: Res<MonsterConfig>,
 ) {
     timer.0.tick(time.delta());
@@ -102,35 +103,49 @@ fn spawn_monsters_system(
             attempts += 1;
             if attempts > 5 { break; } // unikamy nieskończonej pętli
         }
+        let mut next = true;
+        for transform in bodies_query {
+            let min_x = transform.translation.x - config.tile_size/2.0;
+            let max_x = transform.translation.x + config.tile_size/2.0;
+            let min_y = transform.translation.y - config.tile_size/2.0;
+            let max_y = transform.translation.y + config.tile_size/2.0;
 
-        let monster_animation_indices = AnimationIndices { first: 0, last: 3 };
+            if pos.x >= min_x && pos.x <= max_x && pos.y >= min_y && pos.y <= max_y {
+                next = false;
+                break;
+            }
+        }
 
-        commands.spawn((
-            Monster,
-            MonsterAI {
-                target_player: false,
-                random_timer: Timer::from_seconds(2.0, TimerMode::Repeating),
-                random_dir: Vec2::ZERO,
-                action_timer: Timer::from_seconds(0.25, TimerMode::Once),
-                action_cooldown: Timer::from_seconds(2.0, TimerMode::Once),
-            },
-            Pending,
-            Mesh2d(meshes.add(Rectangle::new(40.0, 20.0))),
-            Transform::from_xyz(pos.x, pos.y, 1.0),
-            children![(
-                Sprite::from_atlas_image(
-                    texture.clone(),
-                    bevy::prelude::TextureAtlas {
-                        layout: texture_atlas_layout.clone(),
-                        index: monster_animation_indices.first,
-                    },
-                ),
-                Transform::from_xyz(0.0, 43.0, 0.0).with_scale(Vec3::splat(2.0)),
-                monster_animation_indices,
-                AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
-                MonsterSprite,
-            )],
-        ));
+        if next {
+            let monster_animation_indices = AnimationIndices { first: 0, last: 3 };
+
+            commands.spawn((
+                Monster,
+                MonsterAI {
+                    target_player: false,
+                    random_timer: Timer::from_seconds(2.0, TimerMode::Repeating),
+                    random_dir: Vec2::ZERO,
+                    action_timer: Timer::from_seconds(0.25, TimerMode::Once),
+                    action_cooldown: Timer::from_seconds(2.0, TimerMode::Once),
+                },
+                Pending,
+                Mesh2d(meshes.add(Rectangle::new(40.0, 20.0))),
+                Transform::from_xyz(pos.x, pos.y, 1.0),
+                children![(
+                    Sprite::from_atlas_image(
+                        texture.clone(),
+                        bevy::prelude::TextureAtlas {
+                            layout: texture_atlas_layout.clone(),
+                            index: monster_animation_indices.first,
+                        },
+                    ),
+                    Transform::from_xyz(0.0, 43.0, 0.0).with_scale(Vec3::splat(2.0)),
+                    monster_animation_indices,
+                    AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
+                    MonsterSprite,
+                )],
+            ));
+        }
     }
 }
 
@@ -192,6 +207,7 @@ fn monster_ai(
     mut island_manager: ResMut<ResIslandManager>,
     mut commands: Commands,
     config: Res<MonsterConfig>,
+    bodies_query: Query<(&Transform), (Or<(With<Wall>, With<Floor>)>, Without<Pending>, With<RigidBodyHandleComponent>, Without<Player>, Without<Monster>)>,
 ) {
     let (player_transform, mut player_data_some): (Transform, Option<Mut<PlayerData>>) =
     if let Ok((t, mut d)) = player_query.get_single_mut() {
@@ -218,6 +234,40 @@ fn monster_ai(
 
             // despawn jeśli zbyt daleko
             if distance > despawn_distance {
+                let mut colliders_clone = Vec::new();
+                if let Some(rb) = rigid_bodies.0.get(rb_handle.0) {
+                    for collider_handle in rb.colliders() {
+                        colliders_clone.push(collider_handle.clone());
+                    }
+                }
+
+                for collider_handle in colliders_clone {
+                    colliders.0.remove(collider_handle, &mut island_manager.0, &mut rigid_bodies.0, true);
+                }
+                rigid_bodies.0.remove(
+                    rb_handle.0,
+                    &mut island_manager.0,
+                    &mut colliders.0,
+                    &mut ImpulseJointSet::new(),
+                    &mut MultibodyJointSet::new(),
+                    true, // usuwa powiązane collidery
+                );
+                commands.entity(entity).despawn_recursive();
+                continue;
+            }
+            let mut next = true;
+            for transform in bodies_query {
+                let min_x = transform.translation.x - config.tile_size/2.0;
+                let max_x = transform.translation.x + config.tile_size/2.0;
+                let min_y = transform.translation.y - config.tile_size/2.0;
+                let max_y = transform.translation.y + config.tile_size/2.0;
+
+                if monster_pos.x >= min_x && monster_pos.x <= max_x && monster_pos.y >= min_y && monster_pos.y <= max_y {
+                    next = false;
+                    break;
+                }
+            }
+            if !next {
                 let mut colliders_clone = Vec::new();
                 if let Some(rb) = rigid_bodies.0.get(rb_handle.0) {
                     for collider_handle in rb.colliders() {
