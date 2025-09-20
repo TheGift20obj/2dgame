@@ -29,9 +29,9 @@ fn main() {
         HudPlugin,
         PhysicsPlugin,
         ObjectsLoaderPlugin,
-        TerrainGenerationPlugin,
         PlayerPlugin,
         MonsterPlugin,
+        TerrainGenerationPlugin,
     ));
     app.run();
 }
