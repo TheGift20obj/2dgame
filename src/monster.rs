@@ -34,7 +34,7 @@ impl Plugin for MonsterPlugin {
            .insert_resource(MonsterConfig {
                min_spawn_distance: 20.0,   // spawn 20 kratek
                max_despawn_distance: 30.0, // despawn 30 kratek
-               max_monsters: 50,
+               max_monsters: 20,
                world_size_x: (WORLD_SIZE/3) as usize,
                world_size_y: (WORLD_SIZE/3) as usize,
                tile_size: 64.0,
