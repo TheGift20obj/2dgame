@@ -35,8 +35,8 @@ pub fn init(
             brightness: 0.95, // 0.0 = totalna ciemność, 1.0 = pełne światło
         }},
         PointLight2d {
-            intensity: 0.375,
-            radius: 256.0,
+            intensity: 0.1,
+            radius: 512.0,
             ..default()
         },
         Player,
