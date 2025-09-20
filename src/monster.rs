@@ -39,8 +39,8 @@ impl Plugin for MonsterPlugin {
                world_size_y: (WORLD_SIZE/3) as usize,
                tile_size: 64.0,
            })
-           .add_systems(Update, (monster_ai, animate_monster_sprite))
-           .add_systems(Update, spawn_monsters_system);
+           .add_systems(Update, spawn_monsters_system)
+           .add_systems(Update, (monster_ai, animate_monster_sprite));
     }
 }
 
@@ -133,7 +133,7 @@ fn spawn_monsters_system(
     }
 }
 
-pub fn spawn_monsters(
+/*pub fn spawn_monsters(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
@@ -180,7 +180,7 @@ pub fn spawn_monsters(
             )],
         ));
     }
-}
+}*/
 
 fn monster_ai(
     time: Res<Time>,

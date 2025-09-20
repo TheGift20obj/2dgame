@@ -17,13 +17,15 @@ use physics::PhysicsPlugin;
 use player::PlayerPlugin;
 use terrain::TerrainGenerationPlugin;
 use loader::ObjectsLoaderPlugin;
-
 use bevy_light_2d::prelude::*;
+
+use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, DiagnosticsStore};
 
 fn main() {
     let mut app = App::new();
-    app.add_plugins((
+    app.add_systems(Update, show_fps).add_plugins((
         DefaultPlugins.set(ImagePlugin::default_nearest()),
+        FrameTimeDiagnosticsPlugin::default(),
         Light2dPlugin,
         MenuPlugin,
         HudPlugin,
@@ -34,4 +36,13 @@ fn main() {
         TerrainGenerationPlugin,
     ));
     app.run();
+}
+
+
+fn show_fps(diagnostics: Res<DiagnosticsStore>) {
+    if let Some(fps) = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS) {
+        if let Some(value) = fps.smoothed() {
+            println!("FPS: {:.2}", value);
+        }
+    }
 }

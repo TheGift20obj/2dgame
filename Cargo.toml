@@ -9,3 +9,15 @@ rapier2d = { version = "0.25.0", features = [ "simd-stable" ]}
 noise = "0.8"
 rand = "0.8"
 bevy_light_2d = "0.7"
+
+# [profile.dev]
+# opt-level = 3
+# debug = false
+# strip = "none"
+# debug-assertions = false
+# overflow-checks = false
+# lto = false
+# panic = 'unwind'
+# incremental = false
+# codegen-units = 16
+# rpath = false

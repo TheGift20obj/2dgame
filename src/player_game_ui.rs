@@ -8,7 +8,7 @@ impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app
             //.add_systems(Startup, (spawn_health_bar, spawn_inventory_bar))
-            .add_systems(Update, (update_health_bar, update_satamina_bar).chain().run_if(|status: Res<GameStatus>| status.0));
+            .add_systems(Update, (update_health_bar, update_satamina_bar).run_if(|status: Res<GameStatus>| status.0));
     }
 }
 
