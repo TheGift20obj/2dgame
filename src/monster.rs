@@ -39,7 +39,6 @@ impl Plugin for MonsterPlugin {
                world_size_y: (WORLD_SIZE/3) as usize,
                tile_size: 64.0,
            })
-           .add_systems(Startup, spawn_monsters)
            .add_systems(Update, (monster_ai, animate_monster_sprite))
            .add_systems(Update, spawn_monsters_system);
     }
