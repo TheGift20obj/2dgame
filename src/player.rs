@@ -9,6 +9,8 @@ use bevy_light_2d::prelude::*;
 use crate::terrain::{WORLD_SIZE, TILE_SIZE};
 pub struct PlayerPlugin;
 
+use crate::menu_ui::MenuCamera;
+
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         //app.add_systems(Startup, init);
@@ -205,6 +207,10 @@ fn try_heal(
             commands.entity(ui_entity).despawn_recursive();
         }
         crate::menu_ui::setup_ui(&mut commands, &asset_server);
+        commands.spawn((
+            Camera2d,
+            MenuCamera
+        ));
         //commands.spawn((Camera2d, Transform {translation: transform.translation, ..default()}));
         /*let texture = asset_server.load("textures/player_sprite.png");
         let layout = TextureAtlasLayout::from_grid(UVec2::splat(64), 2, 2, None, None);

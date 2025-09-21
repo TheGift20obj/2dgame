@@ -12,6 +12,7 @@ use bevy_light_2d::prelude::*;
 #[derive(Resource, Default)]
 pub struct TerrainMap {
     pub generated: HashSet<IVec2>,
+    pub linked: HashSet<IVec2, Vec<Entity>>,
 }
 
 pub const WORLD_SIZE: i32 = 96;   // liczba kafelków widocznych w danym "obszarze"

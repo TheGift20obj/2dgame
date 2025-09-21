@@ -11,7 +11,7 @@ rand = "0.8"
 bevy_light_2d = "0.7"
 
 # [profile.dev]
-# opt-level = 3
+#opt-level = 3
 # debug = false
 # strip = "none"
 # debug-assertions = false

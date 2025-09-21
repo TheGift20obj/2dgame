@@ -37,13 +37,13 @@ impl Plugin for MenuPlugin {
 
 fn init(mut commands: Commands, asset_server: Res<AssetServer>) {
     setup_ui(&mut commands, &asset_server);
-}
-
-pub fn setup_ui(commands: &mut Commands, asset_server: &Res<AssetServer>) {
     commands.spawn((
         Camera2d,
         MenuCamera
     ));
+}
+
+pub fn setup_ui(commands: &mut Commands, asset_server: &Res<AssetServer>) {
 
     // font used by buttons
     let font = asset_server.load("fonts/Cantarell-Bold.ttf");
@@ -56,9 +56,10 @@ pub fn setup_ui(commands: &mut Commands, asset_server: &Res<AssetServer>) {
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
             flex_direction: FlexDirection::Column,
+            padding: UiRect::top(Val::Percent(13.5)),
             ..default()
         },
-        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
+        ImageNode::new(asset_server.load("textures/menu.png")),
         MenuRoot,
     ))
     .with_children(|parent| {
