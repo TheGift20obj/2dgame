@@ -1,5 +1,7 @@
 use bevy::prelude::*;
 use rapier2d::prelude::*;
+use serde::Deserialize;
+use std::collections::HashMap;
 
 #[derive(Resource)]
 pub struct ResRigidBodySet(pub RigidBodySet);
@@ -91,12 +93,22 @@ pub struct Monster;
 #[derive(Component)]
 pub struct MonsterSprite;
 
+#[derive(Debug, Deserialize, Resource)]
+pub struct ItemConfig {
+    pub items: HashMap<String, Item>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct Item {
-    pub value: String,
+    pub id: String,
+    pub path: String,
+    pub value: f32,
+    pub item_type: String,
+    pub amount: u32,
 }
 
 pub struct Inventory {
-    pub items: Vec<Item>,
+    pub items: HashMap<u32, Item>,
     pub capacity: u32,
 }
 
@@ -104,8 +116,57 @@ impl Inventory {
     pub fn new() -> Self {
         Self {
             capacity: 16,
-            items: Vec::new(),
+            items: HashMap::new(),
         }
+    }
+
+    pub fn init(&mut self, config: &Res<ItemConfig>) {
+        if let Some(sword) = config.items.get("sword_basic") {
+            // np. wrzucamy miecz do slota 0
+            self.items.insert(0, sword.clone());
+        }
+        if let Some(apple) = config.items.get("apple_red") {
+            // np. wrzucamy jabłko do slota 1
+            self.items.insert(1, apple.clone());
+        }
+    }
+
+    pub fn add_item(&mut self, slot: u32, item: Item) -> bool {
+        if slot < self.capacity {
+            self.items.insert(slot, item);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn remove_item(&mut self, slot: u32) -> Option<Item> {
+        self.items.remove(&slot)
+    }
+
+    pub fn remove_one(&mut self, slot: u32) -> Option<Item> {
+        if let Some(item) = self.items.get_mut(&slot) {
+            if item.amount > 1 {
+                item.amount -= 1;
+                // Zwracamy kopię itemu ze zmniejszoną ilością
+                Some(Item {
+                    id: item.id.clone(),
+                    path: item.path.clone(),
+                    value: item.value,
+                    item_type: item.item_type.clone(),
+                    amount: 1, // zwracamy tylko tę jedną sztukę
+                })
+            } else {
+                // amount == 1, więc usuwamy całkowicie
+                self.items.remove(&slot)
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn get_item(&self, slot: u32) -> Option<&Item> {
+        self.items.get(&slot)
     }
 }
 
@@ -121,11 +182,13 @@ pub struct PlayerData {
 }
 
 impl PlayerData {
-    pub fn new() -> Self {
+    pub fn new(config: &Res<ItemConfig>) -> Self {
+        let mut inventory = Inventory::new();
+        inventory.init(config);
         Self {
             health: 100.0,
             max_health: 100.0,
-            inventory: Inventory::new(),
+            inventory: inventory,
             can_heal: Timer::from_seconds(3.14, TimerMode::Once),
             satamina: 360.0,
             min_satamina: 25.0,
@@ -159,3 +222,28 @@ impl PlayerData {
         }
     }
 }
+
+#[derive(Event)]
+pub struct ConsumeEvent {
+    pub slot: u32,     // z którego slotu pochodzi
+    pub item_id: String,
+}
+
+/// Event użycia przedmiotu funkcjonalnego (np. broń, narzędzie)
+#[derive(Event)]
+pub struct FunctionalEvent {
+    pub slot: u32,
+    pub item_id: String,
+}
+
+#[derive(Resource)]
+pub struct InventoryState {
+    pub selected: usize, // aktualnie wybrany slot
+    pub slots: usize,    // liczba slotów
+}
+
+#[derive(Component)]
+pub struct InventorySlot(pub usize);
+
+#[derive(Component)]
+pub struct InventoryImage(pub String);

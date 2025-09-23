@@ -1,0 +1,20 @@
+{
+  "items": {
+    "sword_basic": {
+      "id": "sword_basic",
+      "path": "textures/items/sword_icon.png",
+      "name": "Basic Sword",
+      "value": 10.0,
+      "item_type": "weapon",
+      "amount": 0
+    },
+    "apple_red": {
+      "id": "apple_red",
+      "path": "textures/items/apple_icon.png",
+      "name": "Apple",
+      "value": 10.0,
+      "item_type": "food",
+      "amount": 16
+    }
+  }
+}

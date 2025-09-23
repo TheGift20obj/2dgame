@@ -6,6 +6,7 @@ mod terrain;
 mod loader;
 mod player_game_ui;
 mod menu_ui;
+mod eventer;
 
 use bevy::prelude::*;
 use rapier2d::prelude::*;
@@ -18,8 +19,21 @@ use player::PlayerPlugin;
 use terrain::TerrainGenerationPlugin;
 use loader::ObjectsLoaderPlugin;
 use bevy_light_2d::prelude::*;
+use eventer::EventerPlugin;
 
 use bevy::window::{WindowMode, MonitorSelection};
+
+use std::fs;
+
+fn load_items_config(mut commands: Commands) {
+    let data = fs::read_to_string("assets/config/items.json")
+        .expect("Nie można wczytać pliku konfiguracyjnego");
+
+    let config: ItemConfig =
+        serde_json::from_str(&data).expect("Błąd parsowania pliku JSON");
+
+    commands.insert_resource(config);
+}
 
 fn main() {
     let mut app = App::new();
@@ -40,6 +54,7 @@ fn main() {
         PlayerPlugin,
         MonsterPlugin,
         TerrainGenerationPlugin,
-    ));
+        EventerPlugin,
+    )).add_systems(Startup, load_items_config);
     app.run();
 }

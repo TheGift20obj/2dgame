@@ -25,6 +25,7 @@ pub fn init(
     asset_server: &Res<AssetServer>,
     texture_atlas_layouts: &mut ResMut<Assets<TextureAtlasLayout>>,
     images: &Res<Assets<Image>>,
+    config: &Res<ItemConfig>,
 ) {
     let texture = asset_server.load("textures/player_sprite.png");
     let layout = TextureAtlasLayout::from_grid(UVec2::splat(64), 2, 2, None, None);
@@ -43,7 +44,7 @@ pub fn init(
         },
         Player,
         Pending,
-        PlayerData::new(),
+        PlayerData::new(config),
         Mesh2d(meshes.add(Rectangle::new(50.0, 25.0))),
         Transform::from_xyz(
             0.0,
