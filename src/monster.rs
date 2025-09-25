@@ -11,6 +11,7 @@ pub struct MonsterAI {
     pub random_dir: Vec2,
     pub action_timer: Timer,
     pub action_cooldown: Timer,
+    pub health: f32,
 }
 
 #[derive(Resource)]
@@ -112,6 +113,7 @@ fn spawn_monsters_system(
                 random_dir: Vec2::ZERO,
                 action_timer: Timer::from_seconds(0.25, TimerMode::Once),
                 action_cooldown: Timer::from_seconds(2.0, TimerMode::Once),
+                health: 100.0,
             },
             Pending,
             Mesh2d(meshes.add(Rectangle::new(40.0, 20.0))),
@@ -251,7 +253,7 @@ fn monster_ai(
                     break;
                 }
             }
-            if !next {
+            if !next || ai.health <= 0.0 {
                 let mut colliders_clone = Vec::new();
                 if let Some(rb) = rigid_bodies.0.get(rb_handle.0) {
                     for collider_handle in rb.colliders() {

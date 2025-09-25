@@ -139,7 +139,7 @@ pub fn spawn_inventory_bar(commands: &mut Commands, asset_server: &Res<AssetServ
                                     align_items: AlignItems::End,
                                     ..default()
                                 },
-                                BackgroundColor(Color::NONE),          // brak wypełnienia
+                                BackgroundColor(Color::srgba(1.0, 1.0, 0.0, 0.75)),          // brak wypełnienia
                                 InventorySlot(i),
                                 InventoryImage("None".to_string()),
                                 ImageNode::new(asset_server.load("textures/empty.png")),
@@ -258,9 +258,9 @@ fn update_inventory_ui(
             }
         }
         if slot.0 == state.selected {
-            *color = BackgroundColor(Color::srgba(1.0, 0.0, 0.0, 0.75));
+            *color = BackgroundColor(Color::srgba(1.0, 0.0, 0.0, 0.25));
         } else {
-            *color = BackgroundColor(Color::NONE);
+            *color = BackgroundColor(Color::srgba(1.0, 1.0, 0.0, 0.25));
         }
     }
 }
@@ -269,10 +269,11 @@ fn ui_use_item(
     mut ev_consume: EventWriter<ConsumeEvent>,
     mut ev_func: EventWriter<FunctionalEvent>,
     keyboard: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
     state: Res<InventoryState>,
     query: Query<&PlayerData, With<Player>>,
 ) {
-    if keyboard.just_pressed(KeyCode::Space) {
+    if mouse.just_pressed(MouseButton::Left) {
         let Ok(player_data) = query.single() else {
             return;
         };
