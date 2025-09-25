@@ -8,7 +8,7 @@ use bevy_light_2d::prelude::*;
 
 use crate::terrain::{WORLD_SIZE, TILE_SIZE};
 pub struct PlayerPlugin;
-
+use bevy::window::{PrimaryWindow, Window};
 use crate::menu_ui::MenuCamera;
 
 impl Plugin for PlayerPlugin {
@@ -26,11 +26,12 @@ pub fn init(
     texture_atlas_layouts: &mut ResMut<Assets<TextureAtlasLayout>>,
     images: &Res<Assets<Image>>,
     config: &Res<ItemConfig>,
+    atlas_handles: &Res<AtlasHandles>,
 ) {
-    let texture = asset_server.load("textures/player_sprite.png");
-    let layout = TextureAtlasLayout::from_grid(UVec2::splat(64), 2, 2, None, None);
+    let texture = asset_server.load("textures/player_combined.png");
+    let layout = TextureAtlasLayout::from_grid(UVec2::splat(64), 2, 5, None, None);
     let texture_atlas_layout = texture_atlas_layouts.add(layout);
-    let animation_indices = AnimationIndices { first: 0, last: 3 };
+    let animation_indices = atlas_handles.0.get("walk").unwrap().clone();
     commands.spawn((
         Camera2d,
         Light2d{ambient_light: AmbientLight2d {
@@ -63,6 +64,7 @@ pub fn init(
             animation_indices,
             AnimationTimer(Timer::from_seconds(0.1, TimerMode::Repeating)),
             PlayerSprite,
+            AttackStatus(false),
         )]
     ));
 }
@@ -70,9 +72,13 @@ pub fn init(
 fn animate_sprite(
     time: Res<Time>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut query: Query<(&AnimationIndices, &mut AnimationTimer, &mut Sprite, &mut Transform), With<PlayerSprite>>,
+    mut query: Query<(&mut AnimationIndices, &mut AnimationTimer, &mut Sprite, &mut Transform, &mut AttackStatus), With<PlayerSprite>>,
+    asset_server: Res<AssetServer>,
+    atlas_handles: Res<AtlasHandles>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    mut windows: Query<&mut Window, With<PrimaryWindow>>,
 ) {
-    for (indices, mut timer, mut sprite, mut transform) in &mut query {
+    for (mut indices, mut timer, mut sprite, mut transform, mut atack) in &mut query {
         timer.tick(time.delta());
 
         // Sprawdzenie czy gracz naciska klawisze ruchu
@@ -95,16 +101,47 @@ fn animate_sprite(
             moving = true;
             direction = 1.0;
         }
+        if atack.0 {
+            direction = transform.scale.x.signum();
+        }
 
-        if moving {
-            transform.scale.x = direction * transform.scale.x.abs();
+        if moving || atack.0 {
+            if atack.0 {
+                let mut window = match windows.get_single_mut() {
+                    Ok(w) => w,
+                    Err(_) => return, // brak okna głównego
+                };
+
+                if let Some(cursor_pos) = window.cursor_position() {
+                    let screen_center_x = window.width() / 2.0;
+                    let direction = if cursor_pos.x > screen_center_x { 1.0 } else { -1.0 };
+                    transform.scale.x = direction * transform.scale.x.abs();
+                }
+            } else {
+                transform.scale.x = direction * transform.scale.x.abs();
+            }
             if timer.just_finished() {
+                let mut last = false;
                 if let Some(atlas) = &mut sprite.texture_atlas {
                     atlas.index = if atlas.index == indices.last {
+                        if atack.0 {
+                            last = true;
+                        }
                         indices.first
                     } else {
                         atlas.index + 1
                     };
+                }
+                if last {
+                    if atack.0 {
+                        atack.0 = false;
+                        let animation_indices = atlas_handles.0.get("walk").unwrap().clone();
+                        if let Some(atlas) = &mut sprite.texture_atlas {
+                            atlas.index = animation_indices.first;
+                        }
+                        *indices = animation_indices;
+                        timer.reset();
+                    }
                 }
             }
         } else {

@@ -52,10 +52,21 @@ pub struct ResPhysicsWork(pub bool);
 pub struct GameStatus(pub bool);
 
 #[derive(Component)]
+pub struct AttackStatus(pub bool);
+
+#[derive(Component)]
+pub struct FinishStatus(pub bool);
+
+#[derive(Component, Clone)]
 pub struct AnimationIndices {
     pub first: usize,
     pub last: usize,
 }
+
+#[derive(Resource)]
+pub struct AtlasHandles (
+    pub HashMap<String, AnimationIndices>,
+);
 
 #[derive(Component, Deref, DerefMut)]
 pub struct AnimationTimer(pub Timer);

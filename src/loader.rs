@@ -9,8 +9,20 @@ pub struct ObjectsLoaderPlugin;
 
 impl Plugin for ObjectsLoaderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, inspect);
+        app.add_systems(Startup, init)
+            .add_systems(Update, inspect);
     }
+}
+
+fn init(
+    mut commands: Commands,
+    mut atlas_handles: ResMut<AtlasHandles>,
+    mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
+) {
+    let handle_0 = AnimationIndices { first: 0, last: 3 };
+    atlas_handles.0.insert("walk".to_string(), handle_0);
+    let handle_1 = AnimationIndices { first: 4, last: 8 };
+    atlas_handles.0.insert("attack".to_string(), handle_1);
 }
 
 fn inspect(

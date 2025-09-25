@@ -55,6 +55,7 @@ fn spawn_monsters_system(
     player_query: Query<&Transform, With<Player>>,
     existing_monsters: Query<Entity, With<Monster>>,
     config: Res<MonsterConfig>,
+    atlas_handles: Res<AtlasHandles>,
 ) {
     timer.0.tick(time.delta());
     if !timer.0.finished() {
@@ -72,8 +73,8 @@ fn spawn_monsters_system(
         return;
     };
 
-    let texture = asset_server.load("textures/monster1.png");
-    let layout = TextureAtlasLayout::from_grid(bevy::prelude::UVec2::splat(64), 2, 2, None, None);
+    let texture = asset_server.load("textures/monster_combined.png");
+    let layout = TextureAtlasLayout::from_grid(bevy::prelude::UVec2::splat(64), 2, 5, None, None);
     let texture_atlas_layout = texture_atlas_layouts.add(layout);
 
     let spawn_distance = config.min_spawn_distance * config.tile_size;
@@ -103,7 +104,7 @@ fn spawn_monsters_system(
             if attempts > 5 { break; } // unikamy nieskończonej pętli
         }
 
-        let monster_animation_indices = AnimationIndices { first: 0, last: 3 };
+        let monster_animation_indices = atlas_handles.0.get("walk").unwrap().clone();
 
         commands.spawn((
             Monster,
@@ -111,7 +112,7 @@ fn spawn_monsters_system(
                 target_player: false,
                 random_timer: Timer::from_seconds(2.0, TimerMode::Repeating),
                 random_dir: Vec2::ZERO,
-                action_timer: Timer::from_seconds(0.25, TimerMode::Once),
+                action_timer: Timer::from_seconds(0.1, TimerMode::Once),
                 action_cooldown: Timer::from_seconds(2.0, TimerMode::Once),
                 health: 100.0,
             },
@@ -130,6 +131,8 @@ fn spawn_monsters_system(
                 monster_animation_indices,
                 AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
                 MonsterSprite,
+                AttackStatus(false),
+                FinishStatus(false),
             )],
         ));
     }
@@ -187,12 +190,14 @@ fn spawn_monsters_system(
 fn monster_ai(
     time: Res<Time>,
     mut player_query: Query<(&Transform, &mut PlayerData), (With<Player>, Without<Pending>)>,
-    mut query: Query<(&mut MonsterAI, &mut RigidBodyHandleComponent, &mut Transform, Entity), (With<Monster>, Without<Player>, Without<Pending>)>,
+    mut query: Query<(&mut MonsterAI, &mut RigidBodyHandleComponent, &mut Transform, Entity, &Children), (With<Monster>, Without<Player>, Without<Pending>)>,
+    mut child_query: Query<(&mut AnimationIndices, &mut AttackStatus, &mut FinishStatus, &mut Sprite), With<MonsterSprite>>,
     mut rigid_bodies: ResMut<ResRigidBodySet>,
     mut colliders: ResMut<ResColliderSet>,
     mut island_manager: ResMut<ResIslandManager>,
     mut commands: Commands,
     config: Res<MonsterConfig>,
+    atlas_handles: Res<AtlasHandles>,
     bodies_query: Query<(&Transform), (Or<(With<Wall>, With<Floor>)>, Without<Pending>, With<RigidBodyHandleComponent>, Without<Player>, Without<Monster>)>,
 ) {
     let (player_transform, mut player_data_some): (Transform, Option<Mut<PlayerData>>) =
@@ -209,7 +214,7 @@ fn monster_ai(
     let action_distance = 1.25 * tile_size;
     let speed = 80.0; // wolniejsze
 
-    for (mut ai, rb_handle, mut rb_transform, entity) in &mut query {
+    for (mut ai, rb_handle, mut rb_transform, entity, children) in &mut query {
         if let Some(rigid_body) = rigid_bodies.0.get_mut(rb_handle.0) {
             let monster_pos = Vec2::new(
                 rigid_body.position().translation.x,
@@ -284,14 +289,35 @@ fn monster_ai(
                         ai.random_timer.reset();
                         ai.action_timer.reset();
                     } else if distance < action_distance {
-                        ai.action_timer.tick(time.delta());
+                        if let Ok((mut child_indices, mut attack, mut finish, mut sprite)) = child_query.get_mut(children[0]) {
+                            if attack.0 == false && finish.0 == false && ai.action_cooldown.finished() {
+                                attack.0 = true;
+                                ai.action_cooldown.reset();
+                                ai.action_timer.reset();
+                                let animation_indices = atlas_handles.0.get("attack").unwrap().clone();
+                                if let Some(atlas) = &mut sprite.texture_atlas {
+                                    atlas.index = animation_indices.first;
+                                }
+                                *child_indices = animation_indices;
+                            }
+                            if finish.0 {
+                                finish.0 = false;
+                                ai.action_cooldown.reset();
+                                player_data.damage(20.0);
+                                player_data.can_heal.reset();
+                            }
+                        }
+                        /*ai.action_timer.tick(time.delta());
                         if ai.action_timer.finished() && ai.action_cooldown.finished() {
                             player_data.damage(20.0);
                             player_data.can_heal.reset();
                             ai.action_cooldown.reset();
                             ai.action_timer.reset();
-                        }
+                        }*/
                     } else {
+                        if let Ok((mut child_indices, mut attack, mut finish, mut sprite)) = child_query.get_mut(children[0]) {
+                            finish.0 = false;
+                        }
                         ai.action_timer.reset();
                     }
                 } else {
@@ -344,17 +370,32 @@ fn rand_dir() -> f32 {
 
 fn animate_monster_sprite(
     time: Res<Time>,
-    mut query: Query<(&AnimationIndices, &mut AnimationTimer, &mut Sprite), With<MonsterSprite>>,
+    atlas_handles: Res<AtlasHandles>,
+    mut query: Query<(&mut AnimationIndices, &mut AnimationTimer, &mut Sprite, &mut AttackStatus, &mut FinishStatus), With<MonsterSprite>>,
 ) {
-    for (indices, mut timer, mut sprite) in &mut query {
+    for (mut indices, mut timer, mut sprite, mut attack, mut finish) in &mut query {
         timer.0.tick(time.delta());
         if timer.0.just_finished() {
             if let Some(atlas) = &mut sprite.texture_atlas {
+                let mut last = false;
                 atlas.index = if atlas.index == indices.last {
+                    last = true;
                     indices.first
                 } else {
                     atlas.index + 1
                 };
+                if last {
+                    if attack.0 {
+                        attack.0 = false;
+                        finish.0 = true;
+                        let animation_indices = atlas_handles.0.get("walk").unwrap().clone();
+                        if let Some(atlas) = &mut sprite.texture_atlas {
+                            atlas.index = animation_indices.first;
+                        }
+                        *indices = animation_indices;
+                        timer.reset();
+                    }
+                }
             }
         }
     }

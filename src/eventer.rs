@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use crate::physics_resources::*;
+use crate::monster::MonsterAI;
 
 pub struct EventerPlugin;
 
@@ -39,7 +40,7 @@ fn food_eventer(
         // efekt spożycia
         if let Some(item) = config.items.get(&ev.item_id) {
             pdata.health = (pdata.health + item.value).min(pdata.max_health);
-            println!("Gracz zjadł {}, +{} HP", ev.item_id, item.value);
+            //println!("Gracz zjadł {}, +{} HP", ev.item_id, item.value);
         }
     }
 }
@@ -47,10 +48,34 @@ fn food_eventer(
 fn functional_eventer(
     mut events: EventReader<FunctionalEvent>,
     config: Res<ItemConfig>,
+    mut query: Query<(&mut AnimationIndices, &mut AnimationTimer, &mut Sprite, &mut GlobalTransform, &mut AttackStatus), With<PlayerSprite>>,
+    asset_server: Res<AssetServer>,
+    atlas_handles: Res<AtlasHandles>,
+    mut query_m: Query<(&mut MonsterAI, &Transform), (With<Monster>, Without<Player>, Without<Pending>)>,
 ) {
     for ev in events.read() {
         if let Some(item) = config.items.get(&ev.item_id) {
-            println!("Gracz użył {}, dmg: {}", ev.item_id, item.value);
+            for (mut indices, mut timer, mut sprite, mut transform, mut atack) in &mut query {
+                if !atack.0 {
+                    atack.0 = true;
+                    let animation_indices = atlas_handles.0.get("attack").unwrap().clone();
+                    if let Some(atlas) = &mut sprite.texture_atlas {
+                        atlas.index = animation_indices.first;
+                    }
+                    *indices = animation_indices;
+                    timer.reset();
+                    let tile_size = 64.0;
+                    let action_distance = 2.5 * tile_size;
+                    for (mut ai, rb_transform) in &mut query_m {
+                        let monster_pos = rb_transform.translation.xy();
+                        let player_pos = transform.translation().xy();
+                        let distance = monster_pos.distance(player_pos);
+                        if distance < action_distance {
+                            ai.health -= item.value;
+                        }
+                    }
+                }
+            }
         }
     }
 }

@@ -171,7 +171,8 @@ fn button_system(
     asset_server: Res<AssetServer>,
     mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
     images: Res<Assets<Image>>,
-    config: Res<ItemConfig>
+    config: Res<ItemConfig>,
+    atlas_handles: Res<AtlasHandles>,
 ) {
     for (interaction, mut bg_color, menu_button) in &mut interaction_query {
         match *interaction {
@@ -188,7 +189,7 @@ fn button_system(
                                 }
                                 crate::player_game_ui::spawn_health_bar(&mut commands);
                                 crate::player_game_ui::spawn_inventory_bar(&mut commands, &asset_server);
-                                crate::player::init(&mut commands, &mut meshes, &mut materials, &asset_server, &mut texture_atlas_layouts, &images, &config);
+                                crate::player::init(&mut commands, &mut meshes, &mut materials, &asset_server, &mut texture_atlas_layouts, &images, &config, &atlas_handles);
                                 game_status.0 = true;
                             }
                         }

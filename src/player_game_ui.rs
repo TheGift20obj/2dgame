@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 use bevy::color::palettes::css::*;
 use crate::physics_resources::*;
-
 pub struct HudPlugin;
 
 impl Plugin for HudPlugin {
@@ -268,7 +267,7 @@ fn update_inventory_ui(
 fn ui_use_item(
     mut ev_consume: EventWriter<ConsumeEvent>,
     mut ev_func: EventWriter<FunctionalEvent>,
-    keyboard: Res<ButtonInput<KeyCode>>,
+    //keyboard: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     state: Res<InventoryState>,
     query: Query<&PlayerData, With<Player>>,
