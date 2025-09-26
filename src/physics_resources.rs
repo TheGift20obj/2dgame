@@ -57,6 +57,9 @@ pub struct AttackStatus(pub bool);
 #[derive(Component)]
 pub struct FinishStatus(pub bool);
 
+#[derive(Component)]
+pub struct PointText(pub u32);
+
 #[derive(Component, Clone)]
 pub struct AnimationIndices {
     pub first: usize,

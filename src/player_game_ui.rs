@@ -26,7 +26,7 @@ struct HealthBar;
 #[derive(Component)]
 struct SataminaBar;
 
-pub fn spawn_health_bar(commands: &mut Commands) {
+pub fn spawn_health_bar(commands: &mut Commands, asset_server: &Res<AssetServer>) {
     // Kontener paska zdrowia
     commands
         .spawn((
@@ -77,6 +77,38 @@ pub fn spawn_health_bar(commands: &mut Commands) {
                 },
                 BackgroundColor(Color::srgb(0.0, 0.8, 0.0)),
                 SataminaBar,
+            ));
+        });
+
+    // Pasek punktów
+    commands
+        .spawn((
+            PlayerUIs,
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(60.0),
+                left: Val::Px(10.0),
+                width: Val::Px(150.0),
+                height: Val::Px(20.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.1, 0.1, 0.1)),
+        ))
+        .with_children(|builder| {
+            builder.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    ..default()
+                },
+                Text::new(format!("Points: {}", 0)),
+                TextFont {
+                    font: asset_server.load("fonts/Cantarell-Bold.ttf"),
+                    font_size: 14.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+                PointText(0),
             ));
         });
 }

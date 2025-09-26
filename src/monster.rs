@@ -12,6 +12,7 @@ pub struct MonsterAI {
     pub action_timer: Timer,
     pub action_cooldown: Timer,
     pub health: f32,
+    pub last_health: f32,
 }
 
 #[derive(Resource)]
@@ -115,6 +116,7 @@ fn spawn_monsters_system(
                 action_timer: Timer::from_seconds(0.1, TimerMode::Once),
                 action_cooldown: Timer::from_seconds(2.0, TimerMode::Once),
                 health: 100.0,
+                last_health: 100.0,
             },
             Pending,
             Mesh2d(meshes.add(Rectangle::new(40.0, 20.0))),
@@ -196,6 +198,7 @@ fn monster_ai(
     mut colliders: ResMut<ResColliderSet>,
     mut island_manager: ResMut<ResIslandManager>,
     mut commands: Commands,
+    mut query_ui: Query<(&mut Text, &mut PointText), With<PointText>>,
     config: Res<MonsterConfig>,
     atlas_handles: Res<AtlasHandles>,
     bodies_query: Query<(&Transform), (Or<(With<Wall>, With<Floor>)>, Without<Pending>, With<RigidBodyHandleComponent>, Without<Player>, Without<Monster>)>,
@@ -205,6 +208,10 @@ fn monster_ai(
         (t.clone(), Some(d)) // <- klonujemy Transform, żeby mieć wartość
     } else {
         (Transform::default(), None)
+    };
+
+    let Ok((mut t_ui, mut t_pt)) = query_ui.single_mut() else {
+        return;
     };
 
     let tile_size = 64.0;
@@ -259,6 +266,10 @@ fn monster_ai(
                 }
             }
             if !next || ai.health <= 0.0 {
+                if ai.health <= 0.0 {
+                    t_pt.0 += 1;
+                    t_ui.0 = format!("Points: {}", t_pt.0);
+                }
                 let mut colliders_clone = Vec::new();
                 if let Some(rb) = rigid_bodies.0.get(rb_handle.0) {
                     for collider_handle in rb.colliders() {
@@ -345,7 +356,14 @@ fn monster_ai(
                 ai.random_dir
             };
 
-            let velocity = dir * speed;
+            let mut velocity = dir * speed;
+            if ai.health < ai.last_health {
+                // obrażenia, cofamy się
+                velocity = -dir * speed * 3.14/2.0;
+                ai.last_health = (ai.health*2.0+ai.last_health)/3.0;
+            } else {
+                ai.last_health = ai.health;
+            }
             rigid_body.set_linvel(vector![velocity.x, velocity.y], true);
             rigid_body.lock_rotations(true, true);
             rigid_body.set_body_type(RigidBodyType::Dynamic, true);

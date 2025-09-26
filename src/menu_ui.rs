@@ -187,7 +187,7 @@ fn button_system(
                                 for entity in camera_query {
                                     commands.entity(entity).despawn_recursive();
                                 }
-                                crate::player_game_ui::spawn_health_bar(&mut commands);
+                                crate::player_game_ui::spawn_health_bar(&mut commands, &asset_server);
                                 crate::player_game_ui::spawn_inventory_bar(&mut commands, &asset_server);
                                 crate::player::init(&mut commands, &mut meshes, &mut materials, &asset_server, &mut texture_atlas_layouts, &images, &config, &atlas_handles);
                                 game_status.0 = true;
