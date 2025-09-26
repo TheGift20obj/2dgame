@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use crate::physics_resources::*;
 use crate::monster::MonsterAI;
+use bevy::window::{PrimaryWindow, Window};
 
 pub struct EventerPlugin;
 
@@ -52,6 +53,8 @@ fn functional_eventer(
     asset_server: Res<AssetServer>,
     atlas_handles: Res<AtlasHandles>,
     mut query_m: Query<(&mut MonsterAI, &Transform), (With<Monster>, Without<Player>, Without<Pending>)>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
 ) {
     for ev in events.read() {
         if let Some(item) = config.items.get(&ev.item_id) {
@@ -65,13 +68,30 @@ fn functional_eventer(
                     *indices = animation_indices;
                     timer.reset();
                     let tile_size = 64.0;
-                    let action_distance = 2.5 * tile_size;
+                    let action_distance = 1.675 * tile_size;
                     for (mut ai, rb_transform) in &mut query_m {
                         let monster_pos = rb_transform.translation.xy();
                         let player_pos = transform.translation().xy();
                         let distance = monster_pos.distance(player_pos);
                         if distance < action_distance {
-                            ai.health -= item.value;
+                            let window = match windows.get_single() {
+                                Ok(w) => w,
+                                Err(_) => return, // brak okna głównego
+                            };
+
+                            if let Some(cursor_pos) = window.cursor_position() {
+                                let to_monster = (monster_pos - player_pos).normalize_or_zero();
+                                let screen_center = Vec2::new(window.width() / 2.0, window.height() / 2.0);
+                                let fixed_cursor_pos = Vec2::new(cursor_pos.x, window.height() - cursor_pos.y);
+                                let cursor_dir = (fixed_cursor_pos - screen_center).normalize_or_zero();
+                                let dot = cursor_dir.dot(to_monster).clamp(-1.0, 1.0);
+                                let angle = dot.acos().to_degrees();
+                                if angle < 75.0 {
+                                    ai.health -= item.value;
+                                } else if distance < 1.25 * tile_size {
+                                    ai.health -= item.value;
+                                }
+                            }
                         }
                     }
                 }

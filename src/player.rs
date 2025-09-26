@@ -76,7 +76,7 @@ fn animate_sprite(
     asset_server: Res<AssetServer>,
     atlas_handles: Res<AtlasHandles>,
     mouse: Res<ButtonInput<MouseButton>>,
-    mut windows: Query<&mut Window, With<PrimaryWindow>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
 ) {
     for (mut indices, mut timer, mut sprite, mut transform, mut atack) in &mut query {
         timer.tick(time.delta());
@@ -107,7 +107,7 @@ fn animate_sprite(
 
         if moving || atack.0 {
             if atack.0 {
-                let mut window = match windows.get_single_mut() {
+                let window = match windows.get_single() {
                     Ok(w) => w,
                     Err(_) => return, // brak okna głównego
                 };
