@@ -9,7 +9,7 @@ impl Plugin for EventerPlugin {
         app
             .add_event::<ConsumeEvent>()
             .add_event::<FunctionalEvent>()
-            .add_systems(Update, (food_eventer, functional_eventer));
+            .add_systems(Update, (food_eventer, functional_eventer).run_if(|status: Res<GameStatus>, status2: Res<ResumeStatus>| status.0 && !status2.0));
     }
 }
 

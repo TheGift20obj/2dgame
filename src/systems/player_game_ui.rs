@@ -9,7 +9,7 @@ impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app
             .insert_resource(InventoryState::default())
-            .add_systems(Update, (update_health_bar, update_satamina_bar, handle_inventory_input, update_inventory_ui, ui_use_item).run_if(|status: Res<GameStatus>| status.0));
+            .add_systems(Update, (update_health_bar, update_satamina_bar, handle_inventory_input, update_inventory_ui, ui_use_item).run_if(|status: Res<GameStatus>, status2: Res<ResumeStatus>| status.0 && !status2.0));
     }
 }
 

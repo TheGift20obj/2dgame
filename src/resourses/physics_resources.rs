@@ -51,6 +51,9 @@ pub struct ResPhysicsWork(pub bool);
 #[derive(Resource)]
 pub struct GameStatus(pub bool);
 
+#[derive(Resource)]
+pub struct ResumeStatus(pub bool);
+
 #[derive(Component)]
 pub struct AttackStatus(pub bool);
 

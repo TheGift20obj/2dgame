@@ -12,7 +12,7 @@ use bevy::window::{PrimaryWindow, Window};
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         //app.add_systems(Startup, init);
-        app.add_systems(Update, (update, animate_sprite, try_heal).run_if(|status: Res<GameStatus>| status.0));
+        app.add_systems(Update, (update, animate_sprite, try_heal).run_if(|status: Res<GameStatus>, status2: Res<ResumeStatus>| status.0 && !status2.0) );
     }
 }
 
@@ -175,7 +175,7 @@ fn update(
 
     let mut speed = 200.0;
 
-    if keyboard_input.pressed(KeyCode::ShiftLeft) { 
+    if keyboard_input.pressed(KeyCode::ShiftLeft) && dir != Vec2::ZERO { 
         player_data.run(1.25, &time);
         speed = 350.0; 
     } else {
@@ -210,6 +210,8 @@ fn try_heal(
     mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
     images: Res<Assets<Image>>,
     mut game_status: ResMut<GameStatus>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut resume_status: ResMut<ResumeStatus>,
 ) {
     let (entity, transform, mut player_data, handle) = if let Ok((e, t, mut d, rb_handle)) = player_query.get_single_mut() {
         (e, t, d, rb_handle)
@@ -217,7 +219,16 @@ fn try_heal(
         return;
     };
 
-    if player_data.can_heal.finished() && player_data.health < 100.0 && player_data.health > 0.0 {
+    if keyboard_input.just_pressed(KeyCode::Escape) {
+        resume_status.0 = true;
+        for ui_entity in player_ui_query {
+            commands.entity(ui_entity).despawn_recursive();
+        }
+        crate::systems::menu_ui::setup_ui(&mut commands, &asset_server);
+        return;
+    }
+
+    if player_data.can_heal.finished() && player_data.health < player_data.max_health && player_data.health > 0.0 {
         player_data.heal(1.0, &time);
     } else if player_data.health == 0.0 {
         game_status.0 = false;

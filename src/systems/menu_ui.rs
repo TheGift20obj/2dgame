@@ -11,7 +11,7 @@ pub struct MenuPlugin;
 
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(GameStatus(false))
+        app.insert_resource(GameStatus(false)).insert_resource(ResumeStatus(false))
             .add_systems(Startup, init)
            .add_systems(Update, button_system);
     }
@@ -147,6 +147,7 @@ fn button_system(
     menu_root_query: Query<Entity, With<MenuRoot>>,
     mut exit: EventWriter<AppExit>,
     mut game_status: ResMut<GameStatus>,
+    mut resume_status: ResMut<ResumeStatus>,
     camera_query: Query<Entity, With<MenuCamera>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
@@ -163,16 +164,17 @@ fn button_system(
                 if let Some(btn) = menu_button {
                     match btn.0 {
                         MenuButtonAction::NewGame => {
-                            // close initial menu (despawn all MenuRoot nodes)
-                            for root in menu_root_query.iter() {
-                                commands.entity(root).despawn_recursive();
-                                for entity in camera_query {
-                                    commands.entity(entity).despawn_recursive();
+                            if !game_status.0 {
+                                for root in menu_root_query.iter() {
+                                    commands.entity(root).despawn_recursive();
+                                    for entity in camera_query {
+                                        commands.entity(entity).despawn_recursive();
+                                    }
+                                    crate::systems::player_game_ui::spawn_health_bar(&mut commands, &asset_server);
+                                    crate::systems::player_game_ui::spawn_inventory_bar(&mut commands, &asset_server);
+                                    crate::systems::player::init(&mut commands, &mut meshes, &mut materials, &asset_server, &mut texture_atlas_layouts, &images, &config, &atlas_handles);
+                                    game_status.0 = true;
                                 }
-                                crate::systems::player_game_ui::spawn_health_bar(&mut commands, &asset_server);
-                                crate::systems::player_game_ui::spawn_inventory_bar(&mut commands, &asset_server);
-                                crate::systems::player::init(&mut commands, &mut meshes, &mut materials, &asset_server, &mut texture_atlas_layouts, &images, &config, &atlas_handles);
-                                game_status.0 = true;
                             }
                         }
                         MenuButtonAction::Exit => {
@@ -180,7 +182,17 @@ fn button_system(
                             exit.send(AppExit::Success);
                         }
                         MenuButtonAction::LoadGame => {
-                            // no-op (placeholder)
+                            if game_status.0 {
+                                resume_status.0 = false;
+                                for root in menu_root_query.iter() {
+                                    commands.entity(root).despawn_recursive();
+                                    for entity in camera_query {
+                                        commands.entity(entity).despawn_recursive();
+                                    }
+                                }
+                                crate::systems::player_game_ui::spawn_health_bar(&mut commands, &asset_server);
+                                crate::systems::player_game_ui::spawn_inventory_bar(&mut commands, &asset_server);
+                            }
                         }
                         MenuButtonAction::Options => {
                             // no-op (placeholder)
