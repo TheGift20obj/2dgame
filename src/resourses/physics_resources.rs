@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use rapier2d::prelude::*;
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Resource)]
 pub struct ResRigidBodySet(pub RigidBodySet);
@@ -193,6 +193,8 @@ pub struct PlayerData {
     pub satamina: f32,
     pub min_satamina: f32,
     pub max_satamina: f32,
+    pub time_heal: Timer,
+    pub time_satamina: Timer,
 }
 
 impl PlayerData {
@@ -206,24 +208,41 @@ impl PlayerData {
             can_heal: Timer::from_seconds(3.14, TimerMode::Once),
             satamina: 360.0,
             min_satamina: 25.0,
-            max_satamina: 360.0
+            max_satamina: 360.0,
+            time_heal: Timer::from_seconds(0.375, TimerMode::Once),
+            time_satamina: Timer::from_seconds(0.025, TimerMode::Once)
         }
     }
 
-    pub fn heal(&mut self, value: f32) {
-        self.health = (self.health + value).clamp(0.0, self.max_health);
+    pub fn heal(&mut self, value: f32, time: &Res<Time>) {
+        if self.time_heal.finished() {
+            self.health = (self.health + value).min(self.max_health);
+            self.can_heal.reset();
+        } else {
+            self.time_heal.tick(time.delta());
+        }
     }
 
     pub fn damage(&mut self, value: f32) {
         self.health = (self.health - value).clamp(0.0, self.max_health);
     }
 
-    pub fn run(&mut self, value: f32) {
-        self.satamina = (self.satamina - value).clamp(0.0, self.max_satamina);
+    pub fn run(&mut self, value: f32, time: &Res<Time>) {
+        if self.time_satamina.finished() {
+            self.satamina = (self.satamina - value).clamp(0.0, self.max_satamina);
+            self.time_satamina.reset();
+        } else {
+            self.time_satamina.tick(time.delta());
+        }
     }
 
-    pub fn rest(&mut self, value: f32) {
-        self.satamina = (self.satamina + value).clamp(0.0, self.max_satamina);
+    pub fn rest(&mut self, value: f32, time: &Res<Time>) {
+        if self.time_satamina.finished() {
+            self.satamina = (self.satamina + value).clamp(0.0, self.max_satamina);
+            self.time_satamina.reset();
+        } else {
+            self.time_satamina.tick(time.delta());
+        }
     }
 
     pub fn fatigue(&mut self) -> f32 {
@@ -261,3 +280,35 @@ pub struct InventorySlot(pub usize);
 
 #[derive(Component)]
 pub struct InventoryImage(pub String);
+
+pub const WORLD_SIZE: i32 = 96;   // liczba kafelków widocznych w danym "obszarze"
+pub const TILE_SIZE: f32 = 64.0;
+
+#[derive(Component)]
+pub struct MonsterAI {
+    pub target_player: bool,
+    pub random_timer: Timer,
+    pub random_dir: Vec2,
+    pub action_timer: Timer,
+    pub action_cooldown: Timer,
+    pub health: f32,
+    pub last_health: f32,
+    pub stun_cooldown: Timer,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum MenuButtonAction {
+    NewGame,
+    LoadGame,
+    Options,
+    Exit,
+}
+
+#[derive(Component, Clone, Copy)]
+pub struct MenuButton(pub MenuButtonAction);
+
+#[derive(Component)]
+pub struct MenuRoot;
+
+#[derive(Component)]
+pub struct MenuCamera;

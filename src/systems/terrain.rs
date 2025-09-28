@@ -10,13 +10,10 @@ use rapier2d::prelude::MultibodyJointSet;
 use bevy_light_2d::prelude::*;
 
 #[derive(Resource, Default)]
-pub struct TerrainMap {
-    pub generated: HashSet<IVec2>,
-    pub linked: HashSet<IVec2, Vec<Entity>>,
+struct TerrainMap {
+    generated: HashSet<IVec2>,
+    linked: HashSet<IVec2, Vec<Entity>>,
 }
-
-pub const WORLD_SIZE: i32 = 96;   // liczba kafelków widocznych w danym "obszarze"
-pub const TILE_SIZE: f32 = 64.0;
 
 pub struct TerrainGenerationPlugin;
 

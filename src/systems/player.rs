@@ -6,10 +6,8 @@ use rapier2d::na::Point2;
 
 use bevy_light_2d::prelude::*;
 
-use crate::systems::terrain::{WORLD_SIZE, TILE_SIZE};
 pub struct PlayerPlugin;
 use bevy::window::{PrimaryWindow, Window};
-use crate::systems::menu_ui::MenuCamera;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
@@ -154,6 +152,7 @@ fn animate_sprite(
 }
 
 fn update(
+    time: Res<Time>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut query: Query<(&RigidBodyHandleComponent, &mut Transform, &mut PlayerData), (With<Player>, Without<Pending>)>,
     mut rigid_bodies: ResMut<ResRigidBodySet>,
@@ -177,10 +176,10 @@ fn update(
     let mut speed = 200.0;
 
     if keyboard_input.pressed(KeyCode::ShiftLeft) { 
-        player_data.run(1.0);
+        player_data.run(1.0, &time);
         speed = 350.0; 
     } else {
-        player_data.rest(0.25);
+        player_data.rest(0.1375, &time);
     }
 
     if player_data.satamina <= player_data.min_satamina {
@@ -219,7 +218,7 @@ fn try_heal(
     };
 
     if player_data.can_heal.finished() && player_data.health < 100.0 && player_data.health > 0.0 {
-        player_data.heal(0.05);
+        player_data.heal(1.0, &time);
     } else if player_data.health == 0.0 {
         game_status.0 = false;
         let mut colliders_clone = Vec::new();

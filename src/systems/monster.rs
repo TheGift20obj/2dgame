@@ -2,33 +2,21 @@ use bevy::prelude::*;
 use rapier2d::prelude::*;
 
 use crate::resourses::physics_resources::*;
-use crate::systems::terrain::{WORLD_SIZE, TILE_SIZE};
 
-#[derive(Component)]
-pub struct MonsterAI {
-    pub target_player: bool,
-    pub random_timer: Timer,
-    pub random_dir: Vec2,
-    pub action_timer: Timer,
-    pub action_cooldown: Timer,
-    pub health: f32,
-    pub last_health: f32,
-}
+pub struct MonsterPlugin;
 
 #[derive(Resource)]
 struct MonsterSpawnTimer(Timer);
 
 #[derive(Resource)]
-pub struct MonsterConfig {
-    pub min_spawn_distance: f32,   // w tileach
-    pub max_despawn_distance: f32, // w tileach
-    pub max_monsters: usize,
-    pub world_size_x: usize,       // w tileach
-    pub world_size_y: usize,       // w tileach
-    pub tile_size: f32,            // piksele
+struct MonsterConfig {
+    min_spawn_distance: f32,   // w tileach
+    max_despawn_distance: f32, // w tileach
+    max_monsters: usize,
+    world_size_x: usize,       // w tileach
+    world_size_y: usize,       // w tileach
+    tile_size: f32,            // piksele
 }
-
-pub struct MonsterPlugin;
 
 impl Plugin for MonsterPlugin {
     fn build(&self, app: &mut App) {
@@ -117,6 +105,7 @@ fn spawn_monsters_system(
                 action_cooldown: Timer::from_seconds(2.0, TimerMode::Once),
                 health: 100.0,
                 last_health: 100.0,
+                stun_cooldown: Timer::from_seconds(0.375, TimerMode::Once),
             },
             Pending,
             Mesh2d(meshes.add(Rectangle::new(40.0, 20.0))),
@@ -214,7 +203,7 @@ fn monster_ai(
         return;
     };
 
-    let tile_size = 64.0;
+    let tile_size = TILE_SIZE;
     let see_distance = 5.0 * tile_size;
     let forget_distance = 10.0 * tile_size;
     let despawn_distance = config.max_despawn_distance * tile_size;
@@ -361,12 +350,18 @@ fn monster_ai(
                 // obrażenia, cofamy się
                 velocity = -dir * speed * 3.14/2.0;
                 ai.last_health = (ai.health*2.0+ai.last_health)/3.0;
+                rigid_body.set_linvel(vector![velocity.x, velocity.y], true);
             } else {
                 ai.last_health = ai.health;
+                if ai.stun_cooldown.finished() {
+                    rigid_body.set_linvel(vector![velocity.x, velocity.y], true);
+                } else {
+                    ai.stun_cooldown.tick(time.delta());
+                }
             }
-            rigid_body.set_linvel(vector![velocity.x, velocity.y], true);
-            rigid_body.lock_rotations(true, true);
-            rigid_body.set_body_type(RigidBodyType::Dynamic, true);
+            //rigid_body.set_linvel(vector![velocity.x, velocity.y], true);
+            //rigid_body.lock_rotations(true, true);
+            //rigid_body.set_body_type(RigidBodyType::Dynamic, true);
             if dir.x < 0.0 {
                 if rb_transform.scale.x < 0.0 {
                     rb_transform.scale.x *= -1.0;

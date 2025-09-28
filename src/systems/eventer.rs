@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 use crate::resourses::physics_resources::*;
-use crate::systems::monster::MonsterAI;
 use bevy::window::{PrimaryWindow, Window};
 
 pub struct EventerPlugin;
@@ -67,7 +66,7 @@ fn functional_eventer(
                     }
                     *indices = animation_indices;
                     timer.reset();
-                    let tile_size = 64.0;
+                    let tile_size = TILE_SIZE;
                     let action_distance = 1.675 * tile_size;
                     for (mut ai, rb_transform) in &mut query_m {
                         let monster_pos = rb_transform.translation.xy();
@@ -88,8 +87,10 @@ fn functional_eventer(
                                 let angle = dot.acos().to_degrees();
                                 if angle < 75.0 {
                                     ai.health -= item.value;
+                                    ai.stun_cooldown.reset();
                                 } else if distance < 1.25 * tile_size {
                                     ai.health -= item.value;
+                                    ai.stun_cooldown.reset();
                                 }
                             }
                         }
