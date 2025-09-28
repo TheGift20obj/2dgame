@@ -4,7 +4,7 @@
       "id": "sword_basic",
       "path": "textures/items/sword_icon.png",
       "name": "Basic Sword",
-      "value": 10.0,
+      "value": [10.0, 45.0],
       "item_type": "weapon",
       "amount": 0
     },
@@ -12,7 +12,7 @@
       "id": "apple_red",
       "path": "textures/items/apple_icon.png",
       "name": "Apple",
-      "value": 10.0,
+      "value": [10.0, 25.0],
       "item_type": "food",
       "amount": 16
     }

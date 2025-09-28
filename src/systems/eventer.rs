@@ -24,7 +24,7 @@ fn food_eventer(
         let Ok(mut pdata) = query.single_mut() else {
             return;
         };
-        if pdata.health >= pdata.max_health {
+        if pdata.health >= pdata.max_health && pdata.satamina >= pdata.max_satamina {
             continue; // nie można jeść, gdy zdrowie jest pełne
         }
         // usuń 1 sztukę itemu z inventory
@@ -42,7 +42,8 @@ fn food_eventer(
 
         // efekt spożycia
         if let Some(item) = config.items.get(&ev.item_id) {
-            pdata.health = (pdata.health + item.value).min(pdata.max_health);
+            pdata.health = (pdata.health + item.value[0]).min(pdata.max_health);
+            pdata.satamina = (pdata.satamina + item.value[1]).min(pdata.max_satamina);
             //println!("Gracz zjadł {}, +{} HP", ev.item_id, item.value);
         }
     }
@@ -55,13 +56,18 @@ fn functional_eventer(
     asset_server: Res<AssetServer>,
     atlas_handles: Res<AtlasHandles>,
     mut query_m: Query<(&mut MonsterAI, &Transform), (With<Monster>, Without<Player>, Without<Pending>)>,
+    mut query_p: Query<&mut PlayerData, With<Player>>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window, With<PrimaryWindow>>,
 ) {
     for ev in events.read() {
+        let Ok(mut pdata) = query_p.single_mut() else {
+            return;
+        };
         if let Some(item) = config.items.get(&ev.item_id) {
             for (mut indices, mut timer, mut sprite, mut transform, mut atack) in &mut query {
-                if !atack.0 {
+                if !atack.0 && pdata.satamina >= pdata.min_satamina {
+                    pdata.satamina = (pdata.satamina - item.value[1]).max(0.0);
                     atack.0 = true;
                     let animation_indices = atlas_handles.0.get("attack").unwrap().clone();
                     if let Some(atlas) = &mut sprite.texture_atlas {
@@ -89,10 +95,10 @@ fn functional_eventer(
                                 let dot = cursor_dir.dot(to_monster).clamp(-1.0, 1.0);
                                 let angle = dot.acos().to_degrees();
                                 if angle < 75.0 {
-                                    ai.health -= item.value;
+                                    ai.health -= item.value[0];
                                     ai.stun_cooldown.reset();
                                 } else if distance < 1.25 * tile_size {
-                                    ai.health -= item.value;
+                                    ai.health -= item.value[0];
                                     ai.stun_cooldown.reset();
                                 }
                             }

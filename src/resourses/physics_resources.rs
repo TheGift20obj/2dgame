@@ -116,7 +116,7 @@ pub struct ItemConfig {
 pub struct Item {
     pub id: String,
     pub path: String,
-    pub value: f32,
+    pub value: [f32; 2],
     pub item_type: String,
     pub amount: u32,
 }
