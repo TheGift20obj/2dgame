@@ -3,6 +3,8 @@ use bevy::color::palettes::css::*;
 use crate::resourses::physics_resources::*;
 pub struct HudPlugin;
 
+const SCALE: f32 = 1.5;
+
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app
@@ -33,10 +35,10 @@ pub fn spawn_health_bar(commands: &mut Commands, asset_server: &Res<AssetServer>
             PlayerUIs,
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Px(10.0),
-                left: Val::Px(10.0),
-                width: Val::Px(200.0),
-                height: Val::Px(20.0),
+                top: Val::Px(10.0 * SCALE),
+                left: Val::Px(10.0 * SCALE),
+                width: Val::Px(200.0 * SCALE),
+                height: Val::Px(20.0 * SCALE),
                 ..default()
             },
             BackgroundColor(Color::srgb(0.1, 0.1, 0.1)), // tło
@@ -59,10 +61,10 @@ pub fn spawn_health_bar(commands: &mut Commands, asset_server: &Res<AssetServer>
             PlayerUIs,
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Px(40.0),
-                left: Val::Px(10.0),
-                width: Val::Px(175.0),
-                height: Val::Px(10.0),
+                top: Val::Px(40.0 * SCALE),
+                left: Val::Px(10.0 * SCALE),
+                width: Val::Px(175.0 * SCALE),
+                height: Val::Px(10.0 * SCALE),
                 ..default()
             },
             BackgroundColor(Color::srgb(0.1, 0.1, 0.1)), // tło
@@ -86,8 +88,8 @@ pub fn spawn_health_bar(commands: &mut Commands, asset_server: &Res<AssetServer>
             PlayerUIs,
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Px(60.0),
-                left: Val::Px(10.0),
+                top: Val::Px(60.0 * SCALE),
+                left: Val::Px(10.0 * SCALE),
                 width: Val::Px(150.0),
                 height: Val::Px(20.0),
                 ..default()

@@ -24,6 +24,9 @@ fn food_eventer(
         let Ok(mut pdata) = query.single_mut() else {
             return;
         };
+        if pdata.health >= pdata.max_health {
+            continue; // nie można jeść, gdy zdrowie jest pełne
+        }
         // usuń 1 sztukę itemu z inventory
         pdata.inventory.remove_one(ev.slot);
         for (slot, child) in slots {

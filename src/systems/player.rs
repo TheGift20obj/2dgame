@@ -176,10 +176,10 @@ fn update(
     let mut speed = 200.0;
 
     if keyboard_input.pressed(KeyCode::ShiftLeft) { 
-        player_data.run(1.0, &time);
+        player_data.run(1.25, &time);
         speed = 350.0; 
     } else {
-        player_data.rest(0.1375, &time);
+        player_data.rest(0.375, &time);
     }
 
     if player_data.satamina <= player_data.min_satamina {
