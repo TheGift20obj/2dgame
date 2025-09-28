@@ -1,6 +1,6 @@
 use bevy::prelude::*;
-use crate::physics_resources::*;
-use crate::monster::MonsterAI;
+use crate::resourses::physics_resources::*;
+use crate::systems::monster::MonsterAI;
 use bevy::window::{PrimaryWindow, Window};
 
 pub struct EventerPlugin;

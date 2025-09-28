@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy::render::mesh::{Mesh, VertexAttributeValues, Indices, PrimitiveTopology};
-use crate::physics_resources::*;
+use crate::resourses::physics_resources::*;
 
 use rapier2d::prelude::*;
 use rapier2d::na::Point2;

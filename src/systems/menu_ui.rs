@@ -1,7 +1,7 @@
 
 use bevy::prelude::*;
 use bevy::app::AppExit;
-use crate::physics_resources::*;
+use crate::resourses::physics_resources::*;
 
 const NORMAL_BUTTON: Color = Color::srgb(0.15, 0.15, 0.15);
 const HOVERED_BUTTON: Color = Color::srgb(0.25, 0.25, 0.25);
@@ -187,9 +187,9 @@ fn button_system(
                                 for entity in camera_query {
                                     commands.entity(entity).despawn_recursive();
                                 }
-                                crate::player_game_ui::spawn_health_bar(&mut commands, &asset_server);
-                                crate::player_game_ui::spawn_inventory_bar(&mut commands, &asset_server);
-                                crate::player::init(&mut commands, &mut meshes, &mut materials, &asset_server, &mut texture_atlas_layouts, &images, &config, &atlas_handles);
+                                crate::systems::player_game_ui::spawn_health_bar(&mut commands, &asset_server);
+                                crate::systems::player_game_ui::spawn_inventory_bar(&mut commands, &asset_server);
+                                crate::systems::player::init(&mut commands, &mut meshes, &mut materials, &asset_server, &mut texture_atlas_layouts, &images, &config, &atlas_handles);
                                 game_status.0 = true;
                             }
                         }

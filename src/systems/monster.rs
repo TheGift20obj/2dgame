@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use rapier2d::prelude::*;
 
-use crate::physics_resources::*;
-use crate::terrain::{WORLD_SIZE, TILE_SIZE};
+use crate::resourses::physics_resources::*;
+use crate::systems::terrain::{WORLD_SIZE, TILE_SIZE};
 
 #[derive(Component)]
 pub struct MonsterAI {

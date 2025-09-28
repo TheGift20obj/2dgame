@@ -1,4 +1,4 @@
-mod physics;
+/*mod physics;
 mod monster;
 mod physics_resources; 
 mod player;
@@ -6,20 +6,23 @@ mod terrain;
 mod loader;
 mod player_game_ui;
 mod menu_ui;
-mod eventer;
+mod eventer;*/
+
+mod systems;
+mod resourses;
 
 use bevy::prelude::*;
 use rapier2d::prelude::*;
-use physics_resources::*;
-use menu_ui::MenuPlugin;
-use player_game_ui::HudPlugin;
-use monster::MonsterPlugin;
-use physics::PhysicsPlugin;
-use player::PlayerPlugin;
-use terrain::TerrainGenerationPlugin;
-use loader::ObjectsLoaderPlugin;
+use resourses::physics_resources::*;
+use systems::menu_ui::MenuPlugin;
+use systems::player_game_ui::HudPlugin;
+use systems::monster::MonsterPlugin;
+use systems::physics::PhysicsPlugin;
+use systems::player::PlayerPlugin;
+use systems::terrain::TerrainGenerationPlugin;
+use systems::loader::ObjectsLoaderPlugin;
 use bevy_light_2d::prelude::*;
-use eventer::EventerPlugin;
+use systems::eventer::EventerPlugin;
 use std::collections::HashMap;
 
 use bevy::window::{WindowMode, MonitorSelection};

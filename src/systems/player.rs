@@ -1,15 +1,15 @@
 use bevy::prelude::*;
-use crate::physics_resources::*;
+use crate::resourses::physics_resources::*;
 
 use rapier2d::prelude::*;
 use rapier2d::na::Point2;
 
 use bevy_light_2d::prelude::*;
 
-use crate::terrain::{WORLD_SIZE, TILE_SIZE};
+use crate::systems::terrain::{WORLD_SIZE, TILE_SIZE};
 pub struct PlayerPlugin;
 use bevy::window::{PrimaryWindow, Window};
-use crate::menu_ui::MenuCamera;
+use crate::systems::menu_ui::MenuCamera;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
@@ -244,7 +244,7 @@ fn try_heal(
         for ui_entity in player_ui_query {
             commands.entity(ui_entity).despawn_recursive();
         }
-        crate::menu_ui::setup_ui(&mut commands, &asset_server);
+        crate::systems::menu_ui::setup_ui(&mut commands, &asset_server);
         commands.spawn((
             Camera2d,
             MenuCamera

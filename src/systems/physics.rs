@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use rapier2d::prelude::*;
-use crate::physics_resources::*;
+use crate::resourses::physics_resources::*;
 
 pub struct PhysicsPlugin;
 

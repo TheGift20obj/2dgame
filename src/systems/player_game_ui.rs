@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy::color::palettes::css::*;
-use crate::physics_resources::*;
+use crate::resourses::physics_resources::*;
 pub struct HudPlugin;
 
 impl Plugin for HudPlugin {

@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use crate::physics_resources::*;
+use crate::resourses::physics_resources::*;
 
 use noise::{NoiseFn, Fbm, Perlin};
 use std::collections::HashSet;
