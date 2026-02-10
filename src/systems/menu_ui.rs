@@ -3,10 +3,18 @@ use bevy::prelude::*;
 use bevy::app::AppExit;
 use crate::resourses::physics_resources::*;
 
+use bevy_2d_screen_space_lightmaps::lightmap_plugin::lightmap_plugin::*;
+use bevy::camera::visibility::RenderLayers;
+
+const NORMAL_LIGHT_LAYER_Z: f32 = 0.0;
+const OCCLUDER_LIGHT_LAYER_Z: f32 = 1.0;
+
+const SPRITE_FLOOR_LAYER_Z: f32 = 0.0;
+const SPRITE_OBJECT_LAYER_Z: f32 = 1.0;
+
 const NORMAL_BUTTON: Color = Color::srgb(0.15, 0.15, 0.15);
 const HOVERED_BUTTON: Color = Color::srgb(0.25, 0.25, 0.25);
 const PRESSED_BUTTON: Color = Color::srgb(0.35, 0.75, 0.35);
-
 pub struct MenuPlugin;
 
 impl Plugin for MenuPlugin {
@@ -21,6 +29,7 @@ fn init(mut commands: Commands, asset_server: Res<AssetServer>) {
     setup_ui(&mut commands, &asset_server);
     commands.spawn((
         Camera2d,
+        //SpriteCamera, AnyNormalCamera,
         MenuCamera
     ));
 }
@@ -65,7 +74,7 @@ pub fn setup_ui(commands: &mut Commands, asset_server: &Res<AssetServer>) {
                 ..default()
             },
             BackgroundColor(NORMAL_BUTTON),
-            BorderColor(Color::BLACK.into()),
+            BorderColor::all(Color::BLACK),
             MenuButton(MenuButtonAction::NewGame),
         ))
         .with_children(|parent| {
@@ -86,7 +95,7 @@ pub fn setup_ui(commands: &mut Commands, asset_server: &Res<AssetServer>) {
                 ..default()
             },
             BackgroundColor(NORMAL_BUTTON),
-            BorderColor(Color::BLACK.into()),
+            BorderColor::all(Color::BLACK),
             MenuButton(MenuButtonAction::LoadGame),
         ))
         .with_children(|parent| {
@@ -107,7 +116,7 @@ pub fn setup_ui(commands: &mut Commands, asset_server: &Res<AssetServer>) {
                 ..default()
             },
             BackgroundColor(NORMAL_BUTTON),
-            BorderColor(Color::BLACK.into()),
+            BorderColor::all(Color::BLACK),
             MenuButton(MenuButtonAction::Options),
         ))
         .with_children(|parent| {
@@ -128,7 +137,7 @@ pub fn setup_ui(commands: &mut Commands, asset_server: &Res<AssetServer>) {
                 ..default()
             },
             BackgroundColor(NORMAL_BUTTON),
-            BorderColor(Color::BLACK.into()),
+            BorderColor::all(Color::BLACK),
             MenuButton(MenuButtonAction::Exit),
         ))
         .with_children(|parent| {
@@ -145,7 +154,7 @@ fn button_system(
     mut commands: Commands,
     mut interaction_query: Query<(&Interaction, &mut BackgroundColor, Option<&MenuButton>), (Changed<Interaction>, With<Button>)>,
     menu_root_query: Query<Entity, With<MenuRoot>>,
-    mut exit: EventWriter<AppExit>,
+    mut exit: MessageWriter<AppExit>,
     mut game_status: ResMut<GameStatus>,
     mut resume_status: ResMut<ResumeStatus>,
     camera_query: Query<Entity, With<MenuCamera>>,
@@ -166,9 +175,9 @@ fn button_system(
                         MenuButtonAction::NewGame => {
                             if !game_status.0 {
                                 for root in menu_root_query.iter() {
-                                    commands.entity(root).despawn_recursive();
+                                    commands.entity(root).despawn();
                                     for entity in camera_query {
-                                        commands.entity(entity).despawn_recursive();
+                                        commands.entity(entity).despawn();
                                     }
                                     crate::systems::player_game_ui::spawn_health_bar(&mut commands, &asset_server);
                                     crate::systems::player_game_ui::spawn_inventory_bar(&mut commands, &asset_server);
@@ -179,15 +188,15 @@ fn button_system(
                         }
                         MenuButtonAction::Exit => {
                             // close the app
-                            exit.send(AppExit::Success);
+                            exit.write(AppExit::Success);
                         }
                         MenuButtonAction::LoadGame => {
                             if game_status.0 {
                                 resume_status.0 = false;
                                 for root in menu_root_query.iter() {
-                                    commands.entity(root).despawn_recursive();
+                                    commands.entity(root).despawn();
                                     for entity in camera_query {
-                                        commands.entity(entity).despawn_recursive();
+                                        commands.entity(entity).despawn();
                                     }
                                 }
                                 crate::systems::player_game_ui::spawn_health_bar(&mut commands, &asset_server);

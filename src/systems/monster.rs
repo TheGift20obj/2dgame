@@ -8,6 +8,9 @@ pub struct MonsterPlugin;
 #[derive(Resource)]
 struct MonsterSpawnTimer(Timer);
 
+use bevy_2d_screen_space_lightmaps::lightmap_plugin::lightmap_plugin::*;
+use bevy::camera::visibility::RenderLayers;
+
 #[derive(Resource)]
 struct MonsterConfig {
     min_spawn_distance: f32,   // w tileach
@@ -47,7 +50,7 @@ fn spawn_monsters_system(
     atlas_handles: Res<AtlasHandles>,
 ) {
     timer.0.tick(time.delta());
-    if !timer.0.finished() {
+    if !timer.0.just_finished() {
         return;
     }
 
@@ -56,7 +59,7 @@ fn spawn_monsters_system(
         return;
     }
 
-    let player_transform = if let Ok(t) = player_query.get_single() {
+    let player_transform = if let Ok(t) = player_query.single() {
         t
     } else {
         return;
@@ -108,8 +111,8 @@ fn spawn_monsters_system(
                 stun_cooldown: Timer::from_seconds(0.375, TimerMode::Once),
             },
             Pending,
-            Mesh2d(meshes.add(Rectangle::new(40.0, 20.0))),
-            Transform::from_xyz(pos.x, pos.y, 1.0),
+            Mesh2d(meshes.add(Rectangle::new(40.0, 27.5))),
+            Transform::from_xyz(pos.x, pos.y, 0.0),
             children![(
                 Sprite::from_atlas_image(
                     texture.clone(),
@@ -118,7 +121,9 @@ fn spawn_monsters_system(
                         index: monster_animation_indices.first,
                     },
                 ),
-                Transform::from_xyz(0.0, 43.0, 0.0).with_scale(Vec3::splat(2.0)),
+                YSort { z: 0.0 },
+                Transform::from_xyz(0.0, 43.0, 64.0).with_scale(Vec3::splat(2.0)),
+                RenderLayers::from_layers(CAMERA_LAYER_ENTITY),
                 monster_animation_indices,
                 AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
                 MonsterSprite,
@@ -193,7 +198,7 @@ fn monster_ai(
     bodies_query: Query<(&Transform), (Or<(With<Wall>, With<Floor>)>, Without<Pending>, With<RigidBodyHandleComponent>, Without<Player>, Without<Monster>)>,
 ) {
     let (player_transform, mut player_data_some): (Transform, Option<Mut<PlayerData>>) =
-    if let Ok((t, mut d)) = player_query.get_single_mut() {
+    if let Ok((t, mut d)) = player_query.single_mut() {
         (t.clone(), Some(d)) // <- klonujemy Transform, żeby mieć wartość
     } else {
         (Transform::default(), None)
@@ -239,7 +244,7 @@ fn monster_ai(
                     &mut MultibodyJointSet::new(),
                     true, // usuwa powiązane collidery
                 );
-                commands.entity(entity).despawn_recursive();
+                commands.entity(entity).despawn();
                 continue;
             }
             let mut next = true;
@@ -277,7 +282,7 @@ fn monster_ai(
                     &mut MultibodyJointSet::new(),
                     true, // usuwa powiązane collidery
                 );
-                commands.entity(entity).despawn_recursive();
+                commands.entity(entity).despawn();
                 continue;
             }
             // AI logika
@@ -290,7 +295,7 @@ fn monster_ai(
                         ai.action_timer.reset();
                     } else if distance < action_distance {
                         if let Ok((mut child_indices, mut attack, mut finish, mut sprite)) = child_query.get_mut(children[0]) {
-                            if attack.0 == false && finish.0 == false && ai.action_cooldown.finished() {
+                            if attack.0 == false && finish.0 == false && ai.action_cooldown.just_finished() {
                                 attack.0 = true;
                                 ai.action_cooldown.reset();
                                 ai.action_timer.reset();
@@ -353,7 +358,7 @@ fn monster_ai(
                 rigid_body.set_linvel(vector![velocity.x, velocity.y], true);
             } else {
                 ai.last_health = ai.health;
-                if ai.stun_cooldown.finished() {
+                if ai.stun_cooldown.just_finished() {
                     rigid_body.set_linvel(vector![velocity.x, velocity.y], true);
                 } else {
                     ai.stun_cooldown.tick(time.delta());
@@ -371,7 +376,7 @@ fn monster_ai(
                     rb_transform.scale.x *= -1.0;
                 }
             }
-            rb_transform.translation.z = -(((WORLD_SIZE as f32*TILE_SIZE)/2.0)/64.0 + rigid_body.translation().y.round()/64.0) + 64.0;
+            //rb_transform.translation.z = -(((WORLD_SIZE as f32*TILE_SIZE)/2.0)/64.0 + rigid_body.translation().y.round()/64.0) + 64.0;
         }
     }
 }

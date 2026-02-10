@@ -218,7 +218,7 @@ impl PlayerData {
     }
 
     pub fn heal(&mut self, value: f32, time: &Res<Time>) {
-        if self.time_heal.finished() {
+        if self.time_heal.just_finished() {
             self.health = (self.health + value).min(self.max_health);
             self.can_heal.reset();
         } else {
@@ -231,7 +231,7 @@ impl PlayerData {
     }
 
     pub fn run(&mut self, value: f32, time: &Res<Time>) {
-        if self.time_satamina.finished() {
+        if self.time_satamina.just_finished() {
             self.satamina = (self.satamina - value).clamp(0.0, self.max_satamina);
             self.time_satamina.reset();
         } else {
@@ -240,7 +240,7 @@ impl PlayerData {
     }
 
     pub fn rest(&mut self, value: f32, time: &Res<Time>) {
-        if self.time_satamina.finished() {
+        if self.time_satamina.just_finished() {
             self.satamina = (self.satamina + value).clamp(0.0, self.max_satamina);
             self.time_satamina.reset();
         } else {
@@ -259,17 +259,22 @@ impl PlayerData {
     }
 }
 
-#[derive(Event)]
+#[derive(Message)]
 pub struct ConsumeEvent {
     pub slot: u32,     // z którego slotu pochodzi
     pub item_id: String,
 }
 
 /// Event użycia przedmiotu funkcjonalnego (np. broń, narzędzie)
-#[derive(Event)]
+#[derive(Message)]
 pub struct FunctionalEvent {
     pub slot: u32,
     pub item_id: String,
+}
+
+#[derive(Component)]
+pub struct YSort {
+    pub z: f32,
 }
 
 #[derive(Resource)]
@@ -315,3 +320,11 @@ pub struct MenuRoot;
 
 #[derive(Component)]
 pub struct MenuCamera;
+
+pub const CAMERA_LAYER_SPRITE: usize = 1; // warstwa dla sprite'ów (podłoga, widoczne ściany)
+pub const CAMERA_LAYER_LIGHT: usize  = 2; // warstwa dla światła i occluderów
+
+pub const CAMERA_LAYER_FLOOR: &[usize] = &[1];
+pub const CAMERA_LAYER_ENTITY: &[usize] = &[1];
+pub const CAMERA_LAYER_EFFECT: &[usize] = &[1];
+pub const CAMERA_LAYER_WALL: &[usize] = &[1];

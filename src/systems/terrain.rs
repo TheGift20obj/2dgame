@@ -7,12 +7,174 @@ use std::collections::HashSet;
 use rapier2d::prelude::ImpulseJointSet;
 use rapier2d::prelude::MultibodyJointSet;
 
-use bevy_light_2d::prelude::*;
+use bevy_2d_screen_space_lightmaps::lightmap_plugin::lightmap_plugin::*;
+use bevy::camera::visibility::RenderLayers;
+
+use std::collections::HashMap;
+use bevy_firefly::prelude::*;
+
+#[derive(Component, Clone)]
+pub struct GapOccluder;
+
+const TR_LOCAL: Vec2 = Vec2::new(-TILE_SIZE / 9.0, TILE_SIZE / 1.75);
+const HALF_TILE: Vec2 = Vec2::new(TILE_SIZE / 1.125, TILE_SIZE / 1.125);
+
+#[derive(Component, Clone)]
+pub struct OccluderMeta {
+    /// lokalny transform taki jaki miał occluder na starcie (base)
+    pub base_local: Transform,
+    /// base half extents (x = half_width, y = half_height)
+    pub base_half: Vec2,
+}
 
 #[derive(Resource, Default)]
 struct TerrainMap {
     generated: HashSet<IVec2>,
     linked: HashSet<IVec2, Vec<Entity>>,
+    wall_map: HashMap<IVec2, Entity>,
+    pub gap_occluders: HashMap<(Entity, Entity), Entity>,
+}
+
+impl TerrainMap {
+    /// Tworzy canonical key (A,B) niezależnie od kolejności
+    fn canonical_pair(a: Entity, b: Entity) -> (Entity, Entity) {
+        if a.index() < b.index() { (a,b) } else { (b,a) }
+    }
+
+    /// Dodaje gap occluder między dwoma ścianami
+    pub fn add_gap_occluder(
+        &mut self,
+        a: Entity,
+        b: Entity,
+        gap_entity: Entity,
+    ) {
+        let key = Self::canonical_pair(a, b);
+        self.gap_occluders.insert(key, gap_entity);
+    }
+
+    /// Pobiera wszystkie gapy powiązane z wybraną ścianą
+    pub fn get_gaps_for_wall(&self, wall: Entity) -> Vec<Entity> {
+        self.gap_occluders
+            .iter()
+            .filter_map(|(&(a,b), &gap)| if a==wall || b==wall { Some(gap) } else { None })
+            .collect()
+    }
+
+    /// Usuwa wszystkie gapy powiązane z wybraną ścianą
+    pub fn remove_gaps_for_wall(
+        &mut self,
+        wall: Entity,
+        commands: &mut Commands
+    ) {
+        let keys_to_remove: Vec<(Entity,Entity)> = self.gap_occluders
+            .iter()
+            .filter(|&(&k,_)| k.0 == wall || k.1 == wall)
+            .map(|(&k,_)| k)
+            .collect();
+
+        for key in keys_to_remove {
+            if let Some(gap_ent) = self.gap_occluders.remove(&key) {
+                commands.entity(gap_ent).despawn();
+            }
+        }
+    }
+
+    /// Znajduje sąsiednie ściany w czterech kierunkach (w gridzie)
+    pub fn find_adjacent_walls(
+        &self,
+        wall_pos: IVec2,
+    ) -> Vec<IVec2> {
+        let mut neighbors = Vec::new();
+        let dirs = [IVec2::new((TILE_SIZE as i32),0), IVec2::new((-TILE_SIZE as i32),0), IVec2::new(0,(TILE_SIZE as i32)), IVec2::new(0,(-TILE_SIZE as i32))];
+        for dir in dirs {
+            let npos = wall_pos + dir;
+            if self.generated.contains(&npos) {
+                neighbors.push(npos);
+            }
+        }
+        neighbors
+    }
+}
+
+pub fn add_gap_occluders_for_tile(
+    commands: &mut Commands,
+    terrain_map: &mut TerrainMap,
+    wall_pos: IVec2,
+    tile_size: f32,
+) {
+    // znajdź sąsiednie ściany
+    let neighbors = terrain_map.find_adjacent_walls(wall_pos);
+
+    if neighbors.is_empty() {
+        //println!("Wall at {:?} has no neighbors, skipping gap occluder", wall_pos);
+        return; // brak sąsiadów → brak gapów
+    }
+    //println!("Wall at {:?} has neighbors at: {:?}", wall_pos, neighbors);
+
+    let wall_entity = match terrain_map.wall_map.get(&wall_pos) {
+        Some(&e) => e,
+        None => return,
+    };
+
+    for &neighbor_pos in neighbors.iter() {
+        let neighbor_entity = match terrain_map.wall_map.get(&neighbor_pos) {
+            Some(&e) => e,
+            None => continue,
+        };
+
+        // canonical key
+        let key = TerrainMap::canonical_pair(wall_entity, neighbor_entity);
+
+        // jeśli gap już istnieje, pomijamy
+        if terrain_map.gap_occluders.contains_key(&key) {
+            continue;
+        }
+
+        // --- WYLICZENIE GAP TRANSFORM ---
+        // gap będzie w połowie dystansu między wall_entity i neighbor_entity
+        let center_x = (wall_pos.x as f32 + neighbor_pos.x as f32) * 0.5;
+        let center_y = (wall_pos.y as f32 + neighbor_pos.y as f32) * 0.5;
+
+        // długość gapu = dystans między krawędziami, przyjmujemy tile_size dla prostoty
+        let half_x = if wall_pos.x != neighbor_pos.x { tile_size * 0.5 } else { HALF_TILE.x };
+        let half_y = if wall_pos.y != neighbor_pos.y { tile_size * 0.5 } else { HALF_TILE.y };
+
+        // wybieramy parenta dla gapu (np wall_entity)
+        let parent_entity = wall_entity;
+
+        // transform lokalny względem parenta
+        let parent_pos = Vec3::new(wall_pos.x as f32, wall_pos.y as f32, 0.0);
+        let local_x = center_x - parent_pos.x + TR_LOCAL.x;
+        let local_y = center_y - parent_pos.y + TR_LOCAL.y;
+
+        let gap_transform = Transform {
+            translation: Vec3::new(local_x, local_y, 0.0),
+            rotation: Default::default(),
+            scale: Vec3::ONE,
+        };
+
+        // spawn gap occludera
+        let gap_entity = commands.spawn((
+            GapOccluder,
+            gap_transform,
+            Occluder2d::rectangle(half_x, half_y),
+            YSort { z: 10.0 },
+        )).id();
+        //println!("Spawning gap between {:?} and {:?} at local ({}, {})", wall_pos, neighbor_pos, local_x, local_y);
+
+        commands.entity(parent_entity).add_children(&[gap_entity]);
+
+        // zapisz do terrain_map
+        terrain_map.add_gap_occluder(wall_entity, neighbor_entity, gap_entity);
+    }
+}
+
+pub fn remove_gap_occluders_for_wall(
+    terrain_map: &mut TerrainMap,
+    wall_entity: Entity,
+    commands: &mut Commands,
+) {
+    terrain_map.remove_gaps_for_wall(wall_entity, commands);
 }
 
 pub struct TerrainGenerationPlugin;
@@ -21,7 +183,35 @@ impl Plugin for TerrainGenerationPlugin {
     fn build(&self, app: &mut App) {
          app.insert_resource(TerrainMap::default())
             .add_systems(Startup, init_terrain)
-            .add_systems(Update, (update_terrain, animate_sprite));
+            .add_systems(Update, (update_terrain, animate_sprite, y_sort_relative));
+    }
+}
+
+fn y_sort_relative(
+    cam_q: Query<&GlobalTransform, With<Camera>>,
+    mut q: Query<(&GlobalTransform, &mut Transform, &YSort)>,
+) {
+    let cam_y = match cam_q.single() {
+        Ok(cam) => cam.translation().y,
+        Err(_) => return,
+    };
+
+    for (global, mut tf, ysort) in q.iter_mut() {
+        let relative_y = global.translation().y - cam_y;
+
+        // sigmoid w MAŁYM zakresie
+        let depth = 1.0 / (1.0 + (-0.05 * relative_y).exp());
+
+        // mniejsze Y = wyżej rysowane
+        tf.translation.z = ysort.z - depth;
+    }
+}
+
+fn y_sort(
+    mut q: Query<(&mut Transform, &YSort)>,
+) {
+    for (mut tf, ysort) in q.iter_mut() {
+        tf.translation.z = ysort.z-(1.0f32 / (1.0f32 + (2.0f32.powf(-0.01*tf.translation.y))));
     }
 }
 
@@ -71,12 +261,12 @@ fn update_terrain(
     query_non_phys: Query<(Entity, &Transform, Option<&Fog>, &Children), (Or<(With<Floor>, With<Wall>)>, Without<RigidBodyHandleComponent>)>,
     mut halo_query: Query<&mut Transform, (With<FogHalo>, Without<Floor>, Without<Wall>, Without<Player>)>,
 ) {
-    let player_transform = if let Ok(d) = player_q.get_single() {
+    let player_transform = if let Ok(d) = player_q.single() {
         d
     } else {
         return;
     };
-    let mut halo_transform = if let Ok(mut d) = halo_query.get_single_mut() {
+    let mut halo_transform = if let Ok(mut d) = halo_query.single_mut() {
         d
     } else {
         return;
@@ -137,14 +327,16 @@ fn update_terrain(
                 &mut MultibodyJointSet::new(),
                 true, // usuwa powiązane collidery
             );
-            commands.entity(entity).despawn_recursive();
+            terrain_map.remove_gaps_for_wall(entity, &mut commands);
+            terrain_map.wall_map.retain(|_, &mut e| e != entity);
+            commands.entity(entity).despawn();
         }
 
         for (entity, transform, _, _) in query_non_phys.iter() {
             if !(transform.translation.x as i32 == pos.x && transform.translation.y as i32 == pos.y) {
                 continue;
             }
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         }
 
         terrain_map.generated.remove(&pos);
@@ -198,7 +390,7 @@ fn generate_area(
                             if !(transform.translation.x as i32 == pos.x && transform.translation.y as i32 == pos.y) {
                                 continue;
                             }
-                            commands.entity(entity).despawn_recursive();
+                            commands.entity(entity).despawn();
                         }
                     }
                 } else {
@@ -219,7 +411,8 @@ fn generate_area(
                         commands.spawn((
                             Floor, Fog,
                             Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
-                            Transform::from_xyz(x, y, 3.14 + -(g_offset/64.0 + y/64.0)+64.0),
+                            //Transform::from_xyz(x, y, 3.14 + -(g_offset/64.0 + y/64.0)+64.0),
+                            Transform::from_xyz(x, y, 0.0),
                             children![(
                                 {
                                     let mut s = Sprite::from_atlas_image(
@@ -229,7 +422,11 @@ fn generate_area(
                                     s.color = Color::srgba(0.25, 0.25, 0.25, transp); // odcień szarości + alfa
                                     s
                                 },
-                                Transform::from_scale(Vec3::splat(tile_size / 32.0)),
+                                Transform {
+                                    scale: Vec3::new(tile_size / 32.0, tile_size / 32.0, 1.0),
+                                    ..Default::default()
+                                },
+                                RenderLayers::from_layers(CAMERA_LAYER_EFFECT),
                                 AnimationIndices { first: 0, last: 3 },
                                 AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
                                 WaterSprite,
@@ -298,11 +495,12 @@ fn generate_area(
             // === Spawn Floor ===
             if texture_path == "textures/water" {
                 // woda animowana
-                commands.spawn((
+                let entity =commands.spawn((
                     Floor,
                     Pending,
                     Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
-                    Transform::from_xyz(x, y, -3.0 + -(g_offset/64.0 + y/64.0)+64.0),
+                    //Transform::from_xyz(x, y, -3.0 + -(g_offset/64.0 + y/64.0)+64.0),
+                    Transform::from_xyz(x, y, -64.0),
                     children![(
                         Sprite::from_atlas_image(
                             water_texture.clone(),
@@ -311,20 +509,31 @@ fn generate_area(
                                 index: 0,
                             },
                         ),
-                        Transform::from_scale(Vec3::splat(tile_size / 32.0)),
+                        Transform {
+                            scale: Vec3::new(tile_size / 32.0, tile_size / 32.0, 1.0),
+                            ..Default::default()
+                        },
+                        YSort { z: 0.0 },
                         AnimationIndices { first: 0, last: 3 },
                         AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
                         WaterSprite,
+                        RenderLayers::from_layers(CAMERA_LAYER_FLOOR)
                     )],
                 ));
             } else {
                 commands.spawn((
                     Floor,
                     Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
-                    Transform::from_xyz(x, y, -3.0 + -(g_offset/64.0 + y/64.0)+64.0),
+                    //Transform::from_xyz(x, y, -3.0 + -(g_offset/64.0 + y/64.0)+64.0),
+                    Transform::from_xyz(x, y, -64.0),
                     children![(
                         Sprite::from_image(asset_server.load(texture_path)),
-                        Transform::from_scale(Vec3::splat(tile_size / 32.0)),
+                        YSort { z: 0.0 },
+                        Transform {
+                            scale: Vec3::new(tile_size / 32.0, tile_size / 32.0, 1.0),
+                            ..Default::default()
+                        },
+                        RenderLayers::from_layers(CAMERA_LAYER_FLOOR)
                     )],
                 ));
             }
@@ -333,7 +542,9 @@ fn generate_area(
             if texture_path == "textures/stone.png" || texture_path == "textures/evil_stone.png" {
                 let wall_val = terrain_noise.get([(x / tile_size) as f64 / 6.0, (y / tile_size) as f64 / 6.0, 999.0]);
                 if wall_val > 0.0 {
-                    spawn_wall(commands, meshes, asset_server, x, y, tile_size, g_offset);
+                    let wall_entity = spawn_wall(commands, meshes, asset_server, x, y, tile_size, g_offset);
+                    terrain_map.wall_map.insert(pos, wall_entity);
+                    add_gap_occluders_for_tile(commands, terrain_map, pos, tile_size);
                 }
             }
 
@@ -355,7 +566,8 @@ fn generate_area(
                     commands.spawn((
                         Floor, Fog,
                         Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
-                        Transform::from_xyz(x, y, 3.14 + -(g_offset/64.0 + y/64.0)+64.0),
+                        //Transform::from_xyz(x, y, 3.14 + -(g_offset/64.0 + y/64.0)+64.0),
+                        Transform::from_xyz(x, y, 0.0),
                         children![(
                             {
                                 let mut s = Sprite::from_atlas_image(
@@ -365,10 +577,14 @@ fn generate_area(
                                 s.color = Color::srgba(0.25, 0.25, 0.25, transp); // odcień szarości + alfa
                                 s
                             },
-                            Transform::from_scale(Vec3::splat(tile_size / 32.0)),
+                            Transform {
+                                scale: Vec3::new(tile_size / 32.0, tile_size / 32.0, 1.0),
+                                ..Default::default()
+                            },
                             AnimationIndices { first: 0, last: 3 },
                             AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
                             WaterSprite,
+                            RenderLayers::from_layers(CAMERA_LAYER_EFFECT),
                         )],
                     ));
                 }
@@ -378,7 +594,7 @@ fn generate_area(
                         if !(transform.translation.x as i32 == pos.x && transform.translation.y as i32 == pos.y) {
                             continue;
                         }
-                        commands.entity(entity).despawn_recursive();
+                        commands.entity(entity).despawn();
                     }
                 }
             }
@@ -386,6 +602,55 @@ fn generate_area(
     }
 }
 
+fn spawn_wall(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    asset_server: &Res<AssetServer>,
+    x: f32,
+    y: f32,
+    tile_size: f32,
+    y_offset: f32,
+) -> Entity {
+    //let half = Vec2::splat(tile_size);
+    let child_local = Transform::from_xyz(TR_LOCAL.x, TR_LOCAL.y, 0.0);
+    return commands.spawn((
+        Wall,
+        Pending,
+        Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
+        Transform::from_xyz(x, y, 0.0),
+        children![(
+            child_local,
+            Occluder2d::rectangle(HALF_TILE.x, HALF_TILE.y),
+            //OccluderMeta { base_local: child_local, base_half: half },
+            YSort { z: 10.0 },
+        ),
+        (
+            RenderLayers::from_layers(CAMERA_LAYER_WALL),
+            YSort { z: 0.0 },
+            Sprite::from_image(asset_server.load("textures/main_wall.png")),
+            Transform::from_xyz(0.0, 0.0, 0.0)
+                .with_scale(Vec3::new(tile_size / 32.0, tile_size / 32.0, 1.0)),
+        ),(
+            RenderLayers::from_layers(CAMERA_LAYER_WALL),
+            YSort { z: 0.0 },
+            Sprite::from_image(asset_server.load("textures/side_wall.png")),
+            Transform::from_xyz(-tile_size, 0.0, 0.05)
+                .with_scale(Vec3::new(tile_size / 32.0, tile_size / 32.0, 1.0)),
+        ),(
+            RenderLayers::from_layers(CAMERA_LAYER_WALL),
+            YSort { z: 0.0 },
+            Sprite::from_image(asset_server.load("textures/up_wall.png")),
+            Transform::from_xyz(0.0, tile_size, 0.05)
+                .with_scale(Vec3::new(tile_size / 32.0, tile_size / 32.0, 1.0)),
+        ),(
+            RenderLayers::from_layers(CAMERA_LAYER_WALL),
+            YSort { z: 0.0 },
+            Sprite::from_image(asset_server.load("textures/corner_wall.png")),
+            Transform::from_xyz(-tile_size, tile_size, 0.1)
+                .with_scale(Vec3::new(tile_size / 32.0, tile_size / 32.0, 1.0)),
+        )],
+    )).id();
+}
 
 fn generate_halo(
     commands: &mut Commands,
@@ -417,7 +682,9 @@ fn generate_halo(
 
                     parent.spawn((
                         Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
-                        Transform::from_xyz(x, y, -(g_offset/64.0 + y/64.0)+64.0),
+                        //Transform::from_xyz(x, y, -(g_offset/64.0 + y/64.0)+64.0),
+                        Transform::from_xyz(x, y, 0.0),
+                         //RenderLayers::from_layers(CAMERA_LAYER_SPRITE),
                         children![(
                             {
                                 let mut s = Sprite::from_atlas_image(
@@ -427,7 +694,11 @@ fn generate_halo(
                                 s.color = Color::srgba(0.25, 0.25, 0.25, 1.0); // odcień szarości + alfa
                                 s
                             },
-                            Transform::from_scale(Vec3::splat(tile_size / 32.0)),
+                                RenderLayers::from_layers(CAMERA_LAYER_EFFECT),
+                            Transform {
+                                scale: Vec3::new(tile_size / 32.0, tile_size / 32.0, 1.0),
+                                ..Default::default()
+                            },
                             AnimationIndices { first: 0, last: 3 },
                             AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
                             WaterSprite,
@@ -457,38 +728,12 @@ fn animate_sprite(
     }
 }
 
-
-
-fn spawn_wall(
-    commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    asset_server: &Res<AssetServer>,
-    x: f32,
-    y: f32,
-    tile_size: f32,
-    y_offset: f32,
-) {
-    commands.spawn((
-        Wall,
-        Pending,
-        Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
-        Transform::from_xyz(x, y, -(y_offset/64.0 + y/64.0)+64.0),
-        children![(
-            Sprite::from_image(asset_server.load("textures/main_wall.png")),
-            Transform::from_xyz(0.0, 0.0, 0.0)
-                .with_scale(Vec3::splat(tile_size / 32.0)),
-        ),(
-            Sprite::from_image(asset_server.load("textures/side_wall.png")),
-            Transform::from_xyz(-tile_size, 0.0, 0.05)
-                .with_scale(Vec3::splat(tile_size / 32.0)),
-        ),(
-            Sprite::from_image(asset_server.load("textures/up_wall.png")),
-            Transform::from_xyz(0.0, tile_size, 0.05)
-                .with_scale(Vec3::splat(tile_size / 32.0)),
-        ),(
-            Sprite::from_image(asset_server.load("textures/corner_wall.png")),
-            Transform::from_xyz(-tile_size, tile_size, 0.1)
-                .with_scale(Vec3::splat(tile_size / 32.0)),
-        )],
-    ));
+/// marker że encja jest "split" stworzonym przez system (Y-part)
+#[derive(Component)]
+pub struct OccluderSplit {
+    pub owner: Entity,
 }
+
+/// marker, że encja to Y-part (rozciągnięcie tylko w Y)
+#[derive(Component)]
+pub struct OccluderPartY;

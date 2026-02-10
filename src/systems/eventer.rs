@@ -7,14 +7,16 @@ pub struct EventerPlugin;
 impl Plugin for EventerPlugin {
     fn build(&self, app: &mut App) {
         app
-            .add_event::<ConsumeEvent>()
-            .add_event::<FunctionalEvent>()
+            .add_message::<ConsumeEvent>()
+            .add_message::<FunctionalEvent>()
+            //.init_resource::<Messages<ConsumeEvent>>()
+            //.init_resource::<Messages<FunctionalEvent>>()
             .add_systems(Update, (food_eventer, functional_eventer).run_if(|status: Res<GameStatus>, status2: Res<ResumeStatus>| status.0 && !status2.0));
     }
 }
 
 fn food_eventer(
-    mut events: EventReader<ConsumeEvent>,
+    mut events: MessageReader<ConsumeEvent>,
     config: Res<ItemConfig>,
     mut query: Query<&mut PlayerData, With<Player>>,
     mut slots: Query<(&InventorySlot, &Children), With<InventorySlot>>,
@@ -50,7 +52,7 @@ fn food_eventer(
 }
 
 fn functional_eventer(
-    mut events: EventReader<FunctionalEvent>,
+    mut events: MessageReader<FunctionalEvent>,
     config: Res<ItemConfig>,
     mut query: Query<(&mut AnimationIndices, &mut AnimationTimer, &mut Sprite, &mut GlobalTransform, &mut AttackStatus), With<PlayerSprite>>,
     asset_server: Res<AssetServer>,
@@ -82,7 +84,7 @@ fn functional_eventer(
                         let player_pos = transform.translation().xy();
                         let distance = monster_pos.distance(player_pos);
                         if distance < action_distance {
-                            let window = match windows.get_single() {
+                            let window = match windows.single() {
                                 Ok(w) => w,
                                 Err(_) => return, // brak okna głównego
                             };

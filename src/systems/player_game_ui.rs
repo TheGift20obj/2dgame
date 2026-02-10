@@ -196,13 +196,13 @@ fn update_health_bar(
     mut player_query: Query<&PlayerData, (With<Player>, Without<Pending>)>,
     mut query: Query<&mut Node, With<HealthBar>>,
 ) {
-    let player_data = if let Ok(d) = player_query.get_single_mut() {
+    let player_data = if let Ok(d) = player_query.single_mut() {
         d
     } else {
         return;
     };
 
-    if let Ok(mut bar) = query.get_single_mut() {
+    if let Ok(mut bar) = query.single_mut() {
         let percent = (player_data.health / player_data.max_health).clamp(0.0, 1.0) * 100.0;
         bar.width = Val::Percent(percent);
     }
@@ -212,13 +212,13 @@ fn update_satamina_bar(
     mut player_query: Query<&PlayerData, (With<Player>, Without<Pending>)>,
     mut query: Query<&mut Node, With<SataminaBar>>,
 ) {
-    let player_data = if let Ok(d) = player_query.get_single_mut() {
+    let player_data = if let Ok(d) = player_query.single_mut() {
         d
     } else {
         return;
     };
 
-    if let Ok(mut bar) = query.get_single_mut() {
+    if let Ok(mut bar) = query.single_mut() {
         let percent = (player_data.satamina / player_data.max_satamina).clamp(0.0, 1.0) * 100.0;
         bar.width = Val::Percent(percent);
     }
@@ -299,8 +299,8 @@ fn update_inventory_ui(
 }
 
 fn ui_use_item(
-    mut ev_consume: EventWriter<ConsumeEvent>,
-    mut ev_func: EventWriter<FunctionalEvent>,
+    mut ev_consume: ResMut<Messages<ConsumeEvent>>,
+    mut ev_func: ResMut<Messages<FunctionalEvent>>,
     //keyboard: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     state: Res<InventoryState>,
@@ -313,13 +313,13 @@ fn ui_use_item(
         if let Some(item) = player_data.inventory.get_item(state.selected as u32) {
             match item.item_type.as_str() {
                 "food" => {
-                    ev_consume.send(ConsumeEvent {
+                    ev_consume.write(ConsumeEvent {
                         slot: state.selected as u32,
                         item_id: item.id.clone(),
                     });
                 }
                 "weapon" => {
-                    ev_func.send(FunctionalEvent {
+                    ev_func.write(FunctionalEvent {
                         slot: state.selected as u32,
                         item_id: item.id.clone(),
                     });

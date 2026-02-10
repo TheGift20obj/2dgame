@@ -4,10 +4,13 @@ use crate::resourses::physics_resources::*;
 use rapier2d::prelude::*;
 use rapier2d::na::Point2;
 
-use bevy_light_2d::prelude::*;
-
 pub struct PlayerPlugin;
 use bevy::window::{PrimaryWindow, Window};
+use bevy_2d_screen_space_lightmaps::lightmap_plugin::lightmap_plugin::*;
+use bevy::camera::visibility::RenderLayers;
+use bevy::camera::{ImageRenderTarget, RenderTarget};
+use bevy::render::view::Hdr;
+use bevy_firefly::prelude::*;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
@@ -30,25 +33,40 @@ pub fn init(
     let layout = TextureAtlasLayout::from_grid(UVec2::splat(64), 2, 5, None, None);
     let texture_atlas_layout = texture_atlas_layouts.add(layout);
     let animation_indices = atlas_handles.0.get("walk").unwrap().clone();
-    commands.spawn((
-        Camera2d,
-        Light2d{ambient_light: AmbientLight2d {
-            color: Color::srgba(0.375, 0.375, 0.375, 1.0), // czarne otoczenie
-            brightness: 0.95, // 0.0 = totalna ciemność, 1.0 = pełne światło
-        }},
+    /*commands.spawn((
         PointLight2d {
-            intensity: 0.1,
-            radius: 512.0,
+            color: Color::srgb(1.0, 0.0, 0.0),
+            range: 1000.0,
             ..default()
         },
+        Transform::from_translation(vec3(0.0, 0.0, 1.0)),
+    ));
+     
+    // spawn a circle occluder
+    commands.spawn((
+        Occluder2d::circle(10.0),
+        Transform::from_translation(vec3(0.0, 50.0, 1.0)),
+    ));*/
+    commands.spawn((
+        Camera2d,
+        //LightCamera, AnyNormalCamera,
+        //RenderLayers::from_layers(CAMERA_LAYER_LIGHT),
+        PointLight2d {
+            range: 750.0,
+            intensity: 0.125,
+            color: Color::WHITE,
+            ..default()
+        },
+        FireflyConfig::default(),
         Player,
         Pending,
+        RenderLayers::from_layers(CAMERA_LAYER_EFFECT),
         PlayerData::new(config),
-        Mesh2d(meshes.add(Rectangle::new(50.0, 25.0))),
+        Mesh2d(meshes.add(Rectangle::new(50.0, 37.5))),
         Transform::from_xyz(
             0.0,
             0.0,
-            1.0,
+            0.0,
         ),
         children![(
             Sprite::from_atlas_image(
@@ -58,7 +76,9 @@ pub fn init(
                     index: animation_indices.first,
                 },
             ),
-            Transform::from_xyz(0.0, 43.0, 0.0).with_scale(Vec3::splat(2.5)),
+            YSort { z: 0.0 },
+            Transform::from_xyz(0.0, 43.0, 65.0).with_scale(Vec3::splat(2.5)),
+            RenderLayers::from_layers(CAMERA_LAYER_ENTITY),
             animation_indices,
             AnimationTimer(Timer::from_seconds(0.1, TimerMode::Repeating)),
             PlayerSprite,
@@ -105,7 +125,7 @@ fn animate_sprite(
 
         if moving || atack.0 {
             if atack.0 {
-                let window = match windows.get_single() {
+                let window = match windows.single() {
                     Ok(w) => w,
                     Err(_) => return, // brak okna głównego
                 };
@@ -156,6 +176,8 @@ fn update(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut query: Query<(&RigidBodyHandleComponent, &mut Transform, &mut PlayerData), (With<Player>, Without<Pending>)>,
     mut rigid_bodies: ResMut<ResRigidBodySet>,
+    mut sprite_camera: Query<&mut Transform, (With<SpriteCamera>, Without<Pending>, Without<Player>)>,
+    mut light_camera: Query<&mut Transform, (With<LightCamera>, Without<Pending>, Without<Player>, Without<SpriteCamera>)>,
 ) {
     let Ok((handle, mut transform, mut player_data)) = query.single_mut() else {
         return;
@@ -193,7 +215,7 @@ fn update(
     };
 
     rigidbody.set_linvel(vector![velocity.x, velocity.y], true);
-    transform.translation.z = -(((WORLD_SIZE as f32*TILE_SIZE)/2.0)/64.0 + rigidbody.translation().y.round()/64.0) + 64.0;
+    //transform.translation.z = -(((WORLD_SIZE as f32*TILE_SIZE)/2.0)/64.0 + rigidbody.translation().y.round()/64.0) + 64.0;
 }
 
 fn try_heal(
@@ -213,7 +235,7 @@ fn try_heal(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut resume_status: ResMut<ResumeStatus>,
 ) {
-    let (entity, transform, mut player_data, handle) = if let Ok((e, t, mut d, rb_handle)) = player_query.get_single_mut() {
+    let (entity, transform, mut player_data, handle) = if let Ok((e, t, mut d, rb_handle)) = player_query.single_mut() {
         (e, t, d, rb_handle)
     } else {
         return;
@@ -222,13 +244,13 @@ fn try_heal(
     if keyboard_input.just_pressed(KeyCode::Escape) {
         resume_status.0 = true;
         for ui_entity in player_ui_query {
-            commands.entity(ui_entity).despawn_recursive();
+            commands.entity(ui_entity).despawn();
         }
         crate::systems::menu_ui::setup_ui(&mut commands, &asset_server);
         return;
     }
 
-    if player_data.can_heal.finished() && player_data.health < player_data.max_health && player_data.health > 0.0 {
+    if player_data.can_heal.just_finished() && player_data.health < player_data.max_health && player_data.health > 0.0 {
         player_data.heal(1.0, &time);
     } else if player_data.health == 0.0 {
         game_status.0 = false;
@@ -250,13 +272,14 @@ fn try_heal(
             &mut MultibodyJointSet::new(),
             true, // usuwa powiązane collidery
         );
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
         for ui_entity in player_ui_query {
-            commands.entity(ui_entity).despawn_recursive();
+            commands.entity(ui_entity).despawn();
         }
         crate::systems::menu_ui::setup_ui(&mut commands, &asset_server);
         commands.spawn((
-            Camera2d,
+            //Camera2d,
+            SpriteCamera, AnyNormalCamera,
             MenuCamera
         ));
         //commands.spawn((Camera2d, Transform {translation: transform.translation, ..default()}));
