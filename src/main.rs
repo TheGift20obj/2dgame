@@ -76,7 +76,7 @@ fn main() {
         new_image.save("assets/textures/player_combined.png").unwrap();
     }*/
     let mut app = App::new();
-    app.insert_resource(AtlasHandles(HashMap::new())).insert_resource(ClearColor(Color::BLACK)).add_plugins((
+    app.insert_resource(AtlasHandles(HashMap::new())).insert_resource(ClearColor(Color::NONE)).add_plugins((
         DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 resolution: (1920_u32, 1080_u32).into(),

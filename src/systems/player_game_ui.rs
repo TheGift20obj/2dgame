@@ -22,12 +22,6 @@ impl Default for InventoryState {
     }
 }
 
-#[derive(Component)]
-struct HealthBar;
-
-#[derive(Component)]
-struct SataminaBar;
-
 pub fn spawn_health_bar(commands: &mut Commands, asset_server: &Res<AssetServer>) {
     // Kontener paska zdrowia
     commands

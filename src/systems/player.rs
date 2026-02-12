@@ -48,27 +48,42 @@ pub fn init(
         Transform::from_translation(vec3(0.0, 50.0, 1.0)),
     ));*/
     commands.spawn((
-        Camera2d,
         //LightCamera, AnyNormalCamera,
         //RenderLayers::from_layers(CAMERA_LAYER_LIGHT),
-        PointLight2d {
-            range: 750.0,
-            intensity: 0.125,
-            color: Color::WHITE,
-            ..default()
-        },
-        FireflyConfig::default(),
         Player,
-        Pending,
-        RenderLayers::from_layers(CAMERA_LAYER_EFFECT),
         PlayerData::new(config),
-        Mesh2d(meshes.add(Rectangle::new(50.0, 37.5))),
+        Mesh2d(meshes.add(Rectangle::new(50.0, 42.5))),
+        Pending,
         Transform::from_xyz(
             0.0,
             0.0,
-            0.0,
+            -32.0,
         ),
+        RenderLayers::from_layers(CAMERA_LAYER_ENTITY),
         children![(
+            Camera2d,
+            Camera {
+                order: 0,
+                ..default()
+            },
+            RenderLayers::from_layers(CAMERA_LAYER_ENTITY),
+            FireflyConfig {
+                //ambient_color: Color::srgba(0.0, 0.0, 0.0, 1.0),
+                ambient_brightness: 0.0025,
+                z_sorting: true,
+                softness: Some(0.5),
+                ..default()
+            },
+            PlayerCamera
+        ),(
+            Camera2d,
+            Camera {
+                order: 1,
+                ..default()
+            },
+            RenderLayers::from_layers(CAMERA_LAYER_EFFECT),
+        ),
+        (
             Sprite::from_atlas_image(
                 texture,
                 TextureAtlas {
@@ -76,13 +91,22 @@ pub fn init(
                     index: animation_indices.first,
                 },
             ),
-            YSort { z: 0.0 },
-            Transform::from_xyz(0.0, 43.0, 65.0).with_scale(Vec3::splat(2.5)),
+            YSort { z: 0.7 },
+            Transform::from_xyz(0.0, 37.5, 65.0).with_scale(Vec3::splat(2.5)),
             RenderLayers::from_layers(CAMERA_LAYER_ENTITY),
             animation_indices,
             AnimationTimer(Timer::from_seconds(0.1, TimerMode::Repeating)),
             PlayerSprite,
             AttackStatus(false),
+        ),(
+            Transform::from_xyz(0.0, 15.0, 0.0),
+            PointLight2d {
+                range: 750.0,
+                intensity: 0.125,
+                color: Color::WHITE,
+                ..default()
+            },
+            YSort { z: 0.0 },
         )]
     ));
 }
@@ -278,8 +302,8 @@ fn try_heal(
         }
         crate::systems::menu_ui::setup_ui(&mut commands, &asset_server);
         commands.spawn((
-            //Camera2d,
-            SpriteCamera, AnyNormalCamera,
+            Camera2d,
+            //SpriteCamera, AnyNormalCamera,
             MenuCamera
         ));
         //commands.spawn((Camera2d, Transform {translation: transform.translation, ..default()}));

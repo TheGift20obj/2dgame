@@ -324,7 +324,23 @@ pub struct MenuCamera;
 pub const CAMERA_LAYER_SPRITE: usize = 1; // warstwa dla sprite'ów (podłoga, widoczne ściany)
 pub const CAMERA_LAYER_LIGHT: usize  = 2; // warstwa dla światła i occluderów
 
-pub const CAMERA_LAYER_FLOOR: &[usize] = &[1];
-pub const CAMERA_LAYER_ENTITY: &[usize] = &[1];
-pub const CAMERA_LAYER_EFFECT: &[usize] = &[1];
-pub const CAMERA_LAYER_WALL: &[usize] = &[1];
+pub const CAMERA_LAYER_FLOOR: &[usize] = &[0];
+pub const CAMERA_LAYER_ENTITY: &[usize] = &[0];
+pub const CAMERA_LAYER_EFFECT: &[usize] = &[2];
+pub const CAMERA_LAYER_WALL: &[usize] = &[0];
+pub const CAMERA_LAYER_MONSTER: &[usize] = &[0];
+
+#[derive(Component)]
+pub struct PlayerCamera;
+
+#[derive(Component)]
+pub struct AICamera;
+
+#[derive(Component)]
+pub struct HealthBar;
+
+#[derive(Component)]
+pub struct SataminaBar;
+
+#[derive(Component)]
+pub struct DebugAI;

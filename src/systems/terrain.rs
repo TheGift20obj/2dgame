@@ -158,7 +158,7 @@ pub fn add_gap_occluders_for_tile(
             GapOccluder,
             gap_transform,
             Occluder2d::rectangle(half_x, half_y),
-            YSort { z: 10.0 },
+            YSort { z: 0.8 },
         )).id();
         //println!("Spawning gap between {:?} and {:?} at local ({}, {})", wall_pos, neighbor_pos, local_x, local_y);
 
@@ -188,7 +188,7 @@ impl Plugin for TerrainGenerationPlugin {
 }
 
 fn y_sort_relative(
-    cam_q: Query<&GlobalTransform, With<Camera>>,
+    cam_q: Query<&GlobalTransform, (With<Camera>, With<PlayerCamera>)>,
     mut q: Query<(&GlobalTransform, &mut Transform, &YSort)>,
 ) {
     let cam_y = match cam_q.single() {
@@ -370,6 +370,10 @@ fn generate_area(
     let water_layout = TextureAtlasLayout::from_grid(UVec2::splat(32), 2, 2, None, None);
     let water_atlas = texture_atlas_layouts.add(water_layout);
 
+    let fog_texture = asset_server.load("textures/fog_black.png");
+    let fog_layout = TextureAtlasLayout::from_grid(UVec2::splat(32), 2, 2, None, None);
+    let fog_atlas = texture_atlas_layouts.add(fog_layout);
+
     for gx in 0..world_size_x {
         for gy in 0..world_size_y {
             let dist2 = ((gx as f32 - x_offset/tile_size) * (gx as f32 - x_offset/tile_size) + (gy as f32 - y_offset/tile_size) * (gy as f32 - y_offset/tile_size)) as f32;
@@ -412,20 +416,21 @@ fn generate_area(
                             Floor, Fog,
                             Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
                             //Transform::from_xyz(x, y, 3.14 + -(g_offset/64.0 + y/64.0)+64.0),
-                            Transform::from_xyz(x, y, 0.0),
+                            Transform::from_xyz(x, y, 100.0),
                             children![(
                                 {
                                     let mut s = Sprite::from_atlas_image(
-                                        water_texture.clone(),
-                                        TextureAtlas { layout: water_atlas.clone(), index: 0 },
+                                        fog_texture.clone(),
+                                        TextureAtlas { layout: fog_atlas.clone(), index: 0 },
                                     );
                                     s.color = Color::srgba(0.25, 0.25, 0.25, transp); // odcień szarości + alfa
                                     s
                                 },
                                 Transform {
-                                    scale: Vec3::new(tile_size / 32.0, tile_size / 32.0, 1.0),
+                                    scale: Vec3::new(tile_size / 32.0, tile_size / 32.0, 0.0),
                                     ..Default::default()
                                 },
+                                Visibility::Inherited,
                                 RenderLayers::from_layers(CAMERA_LAYER_EFFECT),
                                 AnimationIndices { first: 0, last: 3 },
                                 AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
@@ -571,8 +576,8 @@ fn generate_area(
                         children![(
                             {
                                 let mut s = Sprite::from_atlas_image(
-                                    water_texture.clone(),
-                                    TextureAtlas { layout: water_atlas.clone(), index: 0 },
+                                    fog_texture.clone(),
+                                    TextureAtlas { layout: fog_atlas.clone(), index: 0 },
                                 );
                                 s.color = Color::srgba(0.25, 0.25, 0.25, transp); // odcień szarości + alfa
                                 s
@@ -617,36 +622,40 @@ fn spawn_wall(
         Wall,
         Pending,
         Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
-        Transform::from_xyz(x, y, 0.0),
+        Transform::from_xyz(x, y, -32.0),
         children![(
             child_local,
             Occluder2d::rectangle(HALF_TILE.x, HALF_TILE.y),
             //OccluderMeta { base_local: child_local, base_half: half },
-            YSort { z: 10.0 },
+            YSort { z: 0.8 },
+        ),(
+            Occluder2d::rectangle(tile_size, tile_size),
+            //OccluderMeta { base_local: child_local, base_half: half },
+            YSort { z: -8.0 },
         ),
         (
             RenderLayers::from_layers(CAMERA_LAYER_WALL),
-            YSort { z: 0.0 },
+            YSort { z: 0.3 },
             Sprite::from_image(asset_server.load("textures/main_wall.png")),
             Transform::from_xyz(0.0, 0.0, 0.0)
                 .with_scale(Vec3::new(tile_size / 32.0, tile_size / 32.0, 1.0)),
         ),(
             RenderLayers::from_layers(CAMERA_LAYER_WALL),
-            YSort { z: 0.0 },
+            YSort { z: 0.31 },
             Sprite::from_image(asset_server.load("textures/side_wall.png")),
-            Transform::from_xyz(-tile_size, 0.0, 0.05)
+            Transform::from_xyz(-tile_size, 0.0, 0.0)
                 .with_scale(Vec3::new(tile_size / 32.0, tile_size / 32.0, 1.0)),
         ),(
             RenderLayers::from_layers(CAMERA_LAYER_WALL),
-            YSort { z: 0.0 },
+            YSort { z: 0.49 },
             Sprite::from_image(asset_server.load("textures/up_wall.png")),
-            Transform::from_xyz(0.0, tile_size, 0.05)
+            Transform::from_xyz(0.0, tile_size, 0.0)
                 .with_scale(Vec3::new(tile_size / 32.0, tile_size / 32.0, 1.0)),
         ),(
             RenderLayers::from_layers(CAMERA_LAYER_WALL),
-            YSort { z: 0.0 },
+            YSort { z: 0.49 },
             Sprite::from_image(asset_server.load("textures/corner_wall.png")),
-            Transform::from_xyz(-tile_size, tile_size, 0.1)
+            Transform::from_xyz(-tile_size, tile_size, 0.0)
                 .with_scale(Vec3::new(tile_size / 32.0, tile_size / 32.0, 1.0)),
         )],
     )).id();
@@ -668,7 +677,7 @@ fn generate_halo(
     let g_offset = (radius * tile_size) / 2.0;
 
     // atlas wody
-    let water_texture = asset_server.load("textures/water.png");
+    let water_texture = asset_server.load("textures/fog_black.png");
     let water_layout = TextureAtlasLayout::from_grid(UVec2::splat(32), 2, 2, None, None);
     let water_atlas = texture_atlas_layouts.add(water_layout);
 
@@ -683,7 +692,7 @@ fn generate_halo(
                     parent.spawn((
                         Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
                         //Transform::from_xyz(x, y, -(g_offset/64.0 + y/64.0)+64.0),
-                        Transform::from_xyz(x, y, 0.0),
+                        Transform::from_xyz(x, y, -32.0),
                          //RenderLayers::from_layers(CAMERA_LAYER_SPRITE),
                         children![(
                             {

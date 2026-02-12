@@ -2,14 +2,17 @@ use bevy::prelude::*;
 use rapier2d::prelude::*;
 
 use crate::resourses::physics_resources::*;
+use bevy::camera::{RenderTarget, ImageRenderTarget};
 
 pub struct MonsterPlugin;
 
 #[derive(Resource)]
 struct MonsterSpawnTimer(Timer);
 
-use bevy_2d_screen_space_lightmaps::lightmap_plugin::lightmap_plugin::*;
+//use bevy_2d_screen_space_lightmaps::lightmap_plugin::lightmap_plugin::*;
 use bevy::camera::visibility::RenderLayers;
+use bevy_firefly::prelude::*;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages, TextureDescriptor};
 
 #[derive(Resource)]
 struct MonsterConfig {
@@ -27,7 +30,7 @@ impl Plugin for MonsterPlugin {
            .insert_resource(MonsterConfig {
                min_spawn_distance: 20.0,   // spawn 20 kratek
                max_despawn_distance: 30.0, // despawn 30 kratek
-               max_monsters: 10,
+               max_monsters: 1,
                world_size_x: (WORLD_SIZE/3) as usize,
                world_size_y: (WORLD_SIZE/3) as usize,
                tile_size: 64.0,
@@ -48,6 +51,8 @@ fn spawn_monsters_system(
     existing_monsters: Query<Entity, With<Monster>>,
     config: Res<MonsterConfig>,
     atlas_handles: Res<AtlasHandles>,
+    mut images: ResMut<Assets<Image>>,
+    menu_root_query: Query<Entity, (With<HealthBar>, Without<DebugAI>)>,
 ) {
     timer.0.tick(time.delta());
     if !timer.0.just_finished() {
@@ -77,13 +82,13 @@ fn spawn_monsters_system(
     let map_max_x = (config.world_size_x as f32 * config.tile_size) / 2.0;
     let map_min_y = -(config.world_size_y as f32 * config.tile_size) / 2.0;
     let map_max_y = (config.world_size_y as f32 * config.tile_size) / 2.0;
-
+    let mut spawned = false;
     for _ in 0..to_spawn {
         let mut pos;
         let mut attempts = 0;
         loop {
             let angle = rand::random::<f32>() * std::f32::consts::TAU;
-            let distance = spawn_distance + rand::random::<f32>() * (10.0 * config.tile_size); // od 20 do 30 kratek
+            let distance = spawn_distance + rand::random::<f32>() * (0.3 * config.tile_size); // od 20 do 30 kratek
             pos = Vec2::new(
                 player_transform.translation.x + distance * angle.cos(),
                 player_transform.translation.y + distance * angle.sin(),
@@ -95,9 +100,8 @@ fn spawn_monsters_system(
             attempts += 1;
             if attempts > 5 { break; } // unikamy nieskończonej pętli
         }
-
         let monster_animation_indices = atlas_handles.0.get("walk").unwrap().clone();
-
+        let image_handle = create_ai_texture(&mut images, 1024, 1024);
         commands.spawn((
             Monster,
             MonsterAI {
@@ -110,10 +114,22 @@ fn spawn_monsters_system(
                 last_health: 100.0,
                 stun_cooldown: Timer::from_seconds(0.375, TimerMode::Once),
             },
+            RenderLayers::from_layers(CAMERA_LAYER_EFFECT),
             Pending,
-            Mesh2d(meshes.add(Rectangle::new(40.0, 27.5))),
-            Transform::from_xyz(pos.x, pos.y, 0.0),
+            Mesh2d(meshes.add(Rectangle::new(40.0, 42.5))),
+            Transform::from_xyz(pos.x, pos.y, -32.0),
             children![(
+                Camera2d,
+                Camera {
+                    order: -100,
+                    clear_color: ClearColorConfig::None,
+                    ..default()
+                },
+                RenderTarget::Image(ImageRenderTarget::from(image_handle.clone())),
+                RenderLayers::from_layers(CAMERA_LAYER_MONSTER),
+                AICamera,
+            ),
+            (
                 Sprite::from_atlas_image(
                     texture.clone(),
                     bevy::prelude::TextureAtlas {
@@ -121,17 +137,79 @@ fn spawn_monsters_system(
                         index: monster_animation_indices.first,
                     },
                 ),
-                YSort { z: 0.0 },
-                Transform::from_xyz(0.0, 43.0, 64.0).with_scale(Vec3::splat(2.0)),
-                RenderLayers::from_layers(CAMERA_LAYER_ENTITY),
+                YSort { z: 0.375 },
+                Transform::from_xyz(0.0, 37.5, 64.0).with_scale(Vec3::splat(2.0)),
+                RenderLayers::from_layers(CAMERA_LAYER_MONSTER),
                 monster_animation_indices,
                 AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
                 MonsterSprite,
                 AttackStatus(false),
                 FinishStatus(false),
+            ),(
+                Transform::from_xyz(0.0, 15.0, 0.0),
+                PointLight2d {
+                    range: 375.0,
+                    intensity: 0.075,
+                    color: Color::srgba(1.0, 0.5, 0.0, 1.0),
+                    ..default()
+                },
+                YSort { z: 0.0 },
             )],
         ));
+        if spawned == false {
+            for root in menu_root_query.iter() {
+                if spawned == true {
+                    break;
+                }
+                let child = commands.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        width: Val::Percent(120.0),   // 1/5 szerokości
+                        height: Val::Percent(1200.0),  // 1/5 wysokości
+                        right: Val::Px(-1500.0),        // prawy róg
+                        bottom: Val::Px(-450.0),
+                        ..default()
+                    },
+                    ImageNode::new(image_handle.clone()),
+                )).id();
+                commands.entity(root).add_children(&[child]);
+                commands.entity(root).insert(DebugAI);
+                println!("Spawning monster at ({}, {})", pos.x, pos.y);
+                spawned = true;
+            }
+        }
     }
+}
+
+fn create_ai_texture(
+    images: &mut Assets<Image>,
+    width: u32,
+    height: u32,
+) -> Handle<Image> {
+    let size = Extent3d {
+        width,
+        height,
+        depth_or_array_layers: 1,
+    };
+
+    let mut image = Image {
+        texture_descriptor: TextureDescriptor {
+            label: None,
+            size,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8Unorm,
+            mip_level_count: 1,
+            sample_count: 1,
+            usage: TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_DST
+                | TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        },
+        data: vec![0; (width * height * 4) as usize].into(),
+        ..default()
+    };
+
+    images.add(image)
 }
 
 /*pub fn spawn_monsters(
@@ -196,6 +274,7 @@ fn monster_ai(
     config: Res<MonsterConfig>,
     atlas_handles: Res<AtlasHandles>,
     bodies_query: Query<(&Transform), (Or<(With<Wall>, With<Floor>)>, Without<Pending>, With<RigidBodyHandleComponent>, Without<Player>, Without<Monster>)>,
+    mut camera_query: Query<&mut Transform, (With<AICamera>, With<Camera2d>, Without<PlayerCamera>,Without<Player>, Without<RigidBodyHandleComponent>, Without<Wall>, Without<Floor>)>,
 ) {
     let (player_transform, mut player_data_some): (Transform, Option<Mut<PlayerData>>) =
     if let Ok((t, mut d)) = player_query.single_mut() {
@@ -370,10 +449,12 @@ fn monster_ai(
             if dir.x < 0.0 {
                 if rb_transform.scale.x < 0.0 {
                     rb_transform.scale.x *= -1.0;
+                    camera_query.get_mut(children[0]).unwrap().scale.x *= -1.0;
                 }
             } else {
                 if rb_transform.scale.x > 0.0 {
                     rb_transform.scale.x *= -1.0;
+                    camera_query.get_mut(children[0]).unwrap().scale.x *= -1.0;
                 }
             }
             //rb_transform.translation.z = -(((WORLD_SIZE as f32*TILE_SIZE)/2.0)/64.0 + rigid_body.translation().y.round()/64.0) + 64.0;
