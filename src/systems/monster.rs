@@ -51,8 +51,8 @@ fn spawn_monsters_system(
     existing_monsters: Query<Entity, With<Monster>>,
     config: Res<MonsterConfig>,
     atlas_handles: Res<AtlasHandles>,
-    mut images: ResMut<Assets<Image>>,
-    menu_root_query: Query<Entity, (With<HealthBar>, Without<DebugAI>)>,
+    //mut images: ResMut<Assets<Image>>,
+    //menu_root_query: Query<Entity, (With<HealthBar>, Without<DebugAI>)>,
 ) {
     timer.0.tick(time.delta());
     if !timer.0.just_finished() {
@@ -82,7 +82,7 @@ fn spawn_monsters_system(
     let map_max_x = (config.world_size_x as f32 * config.tile_size) / 2.0;
     let map_min_y = -(config.world_size_y as f32 * config.tile_size) / 2.0;
     let map_max_y = (config.world_size_y as f32 * config.tile_size) / 2.0;
-    let mut spawned = false;
+    //let mut spawned = false;
     for _ in 0..to_spawn {
         let mut pos;
         let mut attempts = 0;
@@ -101,7 +101,7 @@ fn spawn_monsters_system(
             if attempts > 5 { break; } // unikamy nieskończonej pętli
         }
         let monster_animation_indices = atlas_handles.0.get("walk").unwrap().clone();
-        let image_handle = create_ai_texture(&mut images, 1024, 1024);
+        //let image_handle = create_ai_texture(&mut images, 1024, 1024);
         commands.spawn((
             Monster,
             MonsterAI {
@@ -118,7 +118,7 @@ fn spawn_monsters_system(
             Pending,
             Mesh2d(meshes.add(Rectangle::new(40.0, 42.5))),
             Transform::from_xyz(pos.x, pos.y, -32.0),
-            children![(
+            children![/*(
                 Camera2d,
                 Camera {
                     order: -100,
@@ -128,7 +128,7 @@ fn spawn_monsters_system(
                 RenderTarget::Image(ImageRenderTarget::from(image_handle.clone())),
                 RenderLayers::from_layers(CAMERA_LAYER_MONSTER),
                 AICamera,
-            ),
+            ),*/
             (
                 Sprite::from_atlas_image(
                     texture.clone(),
@@ -156,7 +156,7 @@ fn spawn_monsters_system(
                 YSort { z: 0.0 },
             )],
         ));
-        if spawned == false {
+        /*if spawned == false {
             for root in menu_root_query.iter() {
                 if spawned == true {
                     break;
@@ -177,7 +177,7 @@ fn spawn_monsters_system(
                 println!("Spawning monster at ({}, {})", pos.x, pos.y);
                 spawned = true;
             }
-        }
+        }*/
     }
 }
 
@@ -449,12 +449,12 @@ fn monster_ai(
             if dir.x < 0.0 {
                 if rb_transform.scale.x < 0.0 {
                     rb_transform.scale.x *= -1.0;
-                    camera_query.get_mut(children[0]).unwrap().scale.x *= -1.0;
+                    //camera_query.get_mut(children[0]).unwrap().scale.x *= -1.0;
                 }
             } else {
                 if rb_transform.scale.x > 0.0 {
                     rb_transform.scale.x *= -1.0;
-                    camera_query.get_mut(children[0]).unwrap().scale.x *= -1.0;
+                    //camera_query.get_mut(children[0]).unwrap().scale.x *= -1.0;
                 }
             }
             //rb_transform.translation.z = -(((WORLD_SIZE as f32*TILE_SIZE)/2.0)/64.0 + rigid_body.translation().y.round()/64.0) + 64.0;
