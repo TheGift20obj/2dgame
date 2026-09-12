@@ -1,23 +1,24 @@
-mod systems;
 mod resourses;
+mod systems;
 
 use bevy::prelude::*;
 use rapier2d::prelude::*;
 use resourses::physics_resources::*;
+use systems::lifecycle::GameLifecyclePlugin;
+use systems::loader::ObjectsLoaderPlugin;
 use systems::menu_ui::MenuPlugin;
-use systems::player_game_ui::HudPlugin;
 use systems::monster::MonsterPlugin;
 use systems::physics::PhysicsPlugin;
 use systems::player::PlayerPlugin;
+use systems::player_game_ui::HudPlugin;
 use systems::terrain::TerrainGenerationPlugin;
-use systems::loader::ObjectsLoaderPlugin;
 //use bevy_light_2d::prelude::*;
-use bevy_firefly::prelude::*;
 use bevy_2d_screen_space_lightmaps::lightmap_plugin::lightmap_plugin::LightmapPlugin;
-use systems::eventer::EventerPlugin;
+use bevy_firefly::prelude::*;
 use std::collections::HashMap;
+use systems::eventer::EventerPlugin;
 
-use bevy::window::{WindowMode, MonitorSelection};
+use bevy::window::{MonitorSelection, WindowMode};
 use std::path::Path;
 
 use image::{DynamicImage, GenericImage, GenericImageView, ImageBuffer, Rgba};
@@ -28,8 +29,7 @@ fn load_items_config(mut commands: Commands) {
     let data = fs::read_to_string("assets/config/items.json")
         .expect("Nie można wczytać pliku konfiguracyjnego");
 
-    let config: ItemConfig =
-        serde_json::from_str(&data).expect("Błąd parsowania pliku JSON");
+    let config: ItemConfig = serde_json::from_str(&data).expect("Błąd parsowania pliku JSON");
 
     commands.insert_resource(config);
 }
@@ -76,27 +76,33 @@ fn main() {
         new_image.save("assets/textures/player_combined.png").unwrap();
     }*/
     let mut app = App::new();
-    app.insert_resource(AtlasHandles(HashMap::new())).insert_resource(ClearColor(Color::NONE)).add_plugins((
-        DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                resolution: (1920_u32, 1080_u32).into(),
-                mode: WindowMode::BorderlessFullscreen(MonitorSelection::Primary),
-                ..default()
-            }),
-            ..default()
-        }).set(ImagePlugin::default_nearest()),
-        //Light2dPlugin,
-        //ScreenSpaceLightmapPlugin,
-        //LightmapPlugin,
-        FireflyPlugin,
-        MenuPlugin,
-        HudPlugin,
-        PhysicsPlugin,
-        ObjectsLoaderPlugin,
-        PlayerPlugin,
-        MonsterPlugin,
-        TerrainGenerationPlugin,
-        EventerPlugin,
-    )).add_systems(Startup, load_items_config);
+    app.insert_resource(AtlasHandles(HashMap::new()))
+        .insert_resource(ClearColor(Color::NONE))
+        .add_plugins((
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        resolution: (1920_u32, 1080_u32).into(),
+                        mode: WindowMode::BorderlessFullscreen(MonitorSelection::Primary),
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(ImagePlugin::default_nearest()),
+            //Light2dPlugin,
+            //ScreenSpaceLightmapPlugin,
+            //LightmapPlugin,
+            FireflyPlugin,
+            MenuPlugin,
+            HudPlugin,
+            PhysicsPlugin,
+            ObjectsLoaderPlugin,
+            PlayerPlugin,
+            MonsterPlugin,
+            TerrainGenerationPlugin,
+            EventerPlugin,
+            GameLifecyclePlugin,
+        ))
+        .add_systems(Startup, load_items_config);
     app.run();
 }

@@ -1,21 +1,28 @@
-use bevy::prelude::*;
 use crate::resourses::physics_resources::*;
+use bevy::prelude::*;
 
-use rapier2d::prelude::*;
 use rapier2d::na::Point2;
+use rapier2d::prelude::*;
 
 pub struct PlayerPlugin;
-use bevy::window::{PrimaryWindow, Window};
-use bevy_2d_screen_space_lightmaps::lightmap_plugin::lightmap_plugin::*;
 use bevy::camera::visibility::RenderLayers;
 use bevy::camera::{ImageRenderTarget, RenderTarget};
 use bevy::render::view::Hdr;
+use bevy::window::{PrimaryWindow, Window};
+use bevy_2d_screen_space_lightmaps::lightmap_plugin::lightmap_plugin::*;
 use bevy_firefly::prelude::*;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         //app.add_systems(Startup, init);
-        app.add_systems(Update, (update, animate_sprite, try_heal).run_if(|status: Res<GameStatus>, status2: Res<ResumeStatus>| status.0 && !status2.0) );
+        app.add_systems(
+            Update,
+            (update, animate_sprite, try_heal)
+                .run_if(|status: Res<GameStatus>, status2: Res<ResumeStatus>| {
+                    status.0 && !status2.0
+                })
+                .in_set(crate::systems::lifecycle::AppSet::Gameplay),
+        );
     }
 }
 
@@ -28,7 +35,7 @@ pub fn init(
     images: &Res<Assets<Image>>,
     config: &Res<ItemConfig>,
     atlas_handles: &Res<AtlasHandles>,
-) {
+) -> Entity {
     let texture = asset_server.load("textures/player_combined.png");
     let layout = TextureAtlasLayout::from_grid(UVec2::splat(64), 2, 5, None, None);
     let texture_atlas_layout = texture_atlas_layouts.add(layout);
@@ -41,80 +48,91 @@ pub fn init(
         },
         Transform::from_translation(vec3(0.0, 0.0, 1.0)),
     ));
-     
+
     // spawn a circle occluder
     commands.spawn((
         Occluder2d::circle(10.0),
         Transform::from_translation(vec3(0.0, 50.0, 1.0)),
     ));*/
-    commands.spawn((
-        //LightCamera, AnyNormalCamera,
-        //RenderLayers::from_layers(CAMERA_LAYER_LIGHT),
-        Player,
-        PlayerData::new(config),
-        Mesh2d(meshes.add(Rectangle::new(50.0, 42.5))),
-        Pending,
-        Transform::from_xyz(
-            0.0,
-            0.0,
-            -32.0,
-        ),
-        RenderLayers::from_layers(CAMERA_LAYER_ENTITY),
-        children![(
-            Camera2d,
-            Camera {
-                order: 0,
-                ..default()
-            },
+    commands
+        .spawn((
+            //LightCamera, AnyNormalCamera,
+            //RenderLayers::from_layers(CAMERA_LAYER_LIGHT),
+            Player,
+            PlayerData::new(config),
+            Mesh2d(meshes.add(Rectangle::new(50.0, 42.5))),
+            Pending,
+            Transform::from_xyz(0.0, 0.0, -32.0),
             RenderLayers::from_layers(CAMERA_LAYER_ENTITY),
-            FireflyConfig {
-                //ambient_color: Color::srgba(0.0, 0.0, 0.0, 1.0),
-                ambient_brightness: 0.0025,
-                z_sorting: true,
-                softness: Some(0.5),
-                ..default()
-            },
-            PlayerCamera
-        ),(
-            Camera2d,
-            Camera {
-                order: 1,
-                ..default()
-            },
-            RenderLayers::from_layers(CAMERA_LAYER_EFFECT),
-        ),
-        (
-            Sprite::from_atlas_image(
-                texture,
-                TextureAtlas {
-                    layout: texture_atlas_layout,
-                    index: animation_indices.first,
-                },
-            ),
-            YSort { z: 0.7 },
-            Transform::from_xyz(0.0, 37.5, 65.0).with_scale(Vec3::splat(2.5)),
-            RenderLayers::from_layers(CAMERA_LAYER_ENTITY),
-            animation_indices,
-            AnimationTimer(Timer::from_seconds(0.1, TimerMode::Repeating)),
-            PlayerSprite,
-            AttackStatus(false),
-        ),(
-            Transform::from_xyz(0.0, 15.0, 0.0),
-            PointLight2d {
-                range: 750.0,
-                intensity: 0.125,
-                color: Color::WHITE,
-                ..default()
-            },
-            YSort { z: 0.0 },
-        )]
-    ));
+            children![
+                (
+                    Camera2d,
+                    Camera {
+                        order: 0,
+                        ..default()
+                    },
+                    RenderLayers::from_layers(CAMERA_LAYER_ENTITY),
+                    FireflyConfig {
+                        //ambient_color: Color::srgba(0.0, 0.0, 0.0, 1.0),
+                        ambient_brightness: 0.0025,
+                        z_sorting: true,
+                        softness: Some(0.5),
+                        ..default()
+                    },
+                    PlayerCamera
+                ),
+                (
+                    Camera2d,
+                    Camera {
+                        order: 1,
+                        ..default()
+                    },
+                    RenderLayers::from_layers(CAMERA_LAYER_EFFECT),
+                ),
+                (
+                    Sprite::from_atlas_image(
+                        texture,
+                        TextureAtlas {
+                            layout: texture_atlas_layout,
+                            index: animation_indices.first,
+                        },
+                    ),
+                    YSort { z: 0.7 },
+                    Transform::from_xyz(0.0, 37.5, 65.0).with_scale(Vec3::splat(2.5)),
+                    RenderLayers::from_layers(CAMERA_LAYER_ENTITY),
+                    animation_indices,
+                    AnimationTimer(Timer::from_seconds(0.1, TimerMode::Repeating)),
+                    PlayerSprite,
+                    AttackStatus(false),
+                ),
+                (
+                    Transform::from_xyz(0.0, 15.0, 0.0),
+                    PointLight2d {
+                        range: 750.0,
+                        intensity: 0.125,
+                        color: Color::WHITE,
+                        ..default()
+                    },
+                    YSort { z: 0.0 },
+                )
+            ],
+        ))
+        .id()
 }
 
 fn animate_sprite(
     time: Res<Time>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut query: Query<(&mut AnimationIndices, &mut AnimationTimer, &mut Sprite, &mut Transform, &mut AttackStatus), With<PlayerSprite>>,
+    mut query: Query<
+        (
+            &mut AnimationIndices,
+            &mut AnimationTimer,
+            &mut Sprite,
+            &mut Transform,
+            &mut AttackStatus,
+        ),
+        With<PlayerSprite>,
+    >,
     asset_server: Res<AssetServer>,
     atlas_handles: Res<AtlasHandles>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -156,7 +174,11 @@ fn animate_sprite(
 
                 if let Some(cursor_pos) = window.cursor_position() {
                     let screen_center_x = window.width() / 2.0;
-                    let direction = if cursor_pos.x > screen_center_x { 1.0 } else { -1.0 };
+                    let direction = if cursor_pos.x > screen_center_x {
+                        1.0
+                    } else {
+                        -1.0
+                    };
                     transform.scale.x = direction * transform.scale.x.abs();
                 }
             } else {
@@ -198,10 +220,24 @@ fn animate_sprite(
 fn update(
     time: Res<Time>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut query: Query<(&RigidBodyHandleComponent, &mut Transform, &mut PlayerData), (With<Player>, Without<Pending>)>,
+    mut query: Query<
+        (&RigidBodyHandleComponent, &mut Transform, &mut PlayerData),
+        (With<Player>, Without<Pending>),
+    >,
     mut rigid_bodies: ResMut<ResRigidBodySet>,
-    mut sprite_camera: Query<&mut Transform, (With<SpriteCamera>, Without<Pending>, Without<Player>)>,
-    mut light_camera: Query<&mut Transform, (With<LightCamera>, Without<Pending>, Without<Player>, Without<SpriteCamera>)>,
+    mut sprite_camera: Query<
+        &mut Transform,
+        (With<SpriteCamera>, Without<Pending>, Without<Player>),
+    >,
+    mut light_camera: Query<
+        &mut Transform,
+        (
+            With<LightCamera>,
+            Without<Pending>,
+            Without<Player>,
+            Without<SpriteCamera>,
+        ),
+    >,
 ) {
     let Ok((handle, mut transform, mut player_data)) = query.single_mut() else {
         return;
@@ -214,16 +250,24 @@ fn update(
     let mut rigidbody = rigid_bodies.0.get_mut(handle.0).unwrap();
 
     let mut dir = Vec2::ZERO;
-    if keyboard_input.pressed(KeyCode::KeyW) { dir.y += 1.0; }
-    if keyboard_input.pressed(KeyCode::KeyS) { dir.y -= 1.0; }
-    if keyboard_input.pressed(KeyCode::KeyA) { dir.x -= 1.0; }
-    if keyboard_input.pressed(KeyCode::KeyD) { dir.x += 1.0; }
+    if keyboard_input.pressed(KeyCode::KeyW) {
+        dir.y += 1.0;
+    }
+    if keyboard_input.pressed(KeyCode::KeyS) {
+        dir.y -= 1.0;
+    }
+    if keyboard_input.pressed(KeyCode::KeyA) {
+        dir.x -= 1.0;
+    }
+    if keyboard_input.pressed(KeyCode::KeyD) {
+        dir.x += 1.0;
+    }
 
     let mut speed = 200.0;
 
-    if keyboard_input.pressed(KeyCode::ShiftLeft) && dir != Vec2::ZERO { 
+    if keyboard_input.pressed(KeyCode::ShiftLeft) && dir != Vec2::ZERO {
         player_data.run(1.25, &time);
-        speed = 350.0; 
+        speed = 350.0;
     } else {
         player_data.rest(0.375, &time);
     }
@@ -243,24 +287,17 @@ fn update(
 }
 
 fn try_heal(
-    mut rigid_bodies: ResMut<ResRigidBodySet>,
-    mut colliders: ResMut<ResColliderSet>,
-    mut island_manager: ResMut<ResIslandManager>,
     mut commands: Commands,
     time: Res<Time>,
-    mut player_query: Query<(Entity, &Transform, &mut PlayerData, &RigidBodyHandleComponent), (With<Player>, Without<Pending>)>,
+    mut player_query: Query<(Entity, &mut PlayerData), (With<Player>, Without<Pending>)>,
     mut player_ui_query: Query<Entity, With<PlayerUIs>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
     asset_server: Res<AssetServer>,
-    mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
-    images: Res<Assets<Image>>,
-    mut game_status: ResMut<GameStatus>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut resume_status: ResMut<ResumeStatus>,
+    mut player_died: MessageWriter<PlayerDied>,
 ) {
-    let (entity, transform, mut player_data, handle) = if let Ok((e, t, mut d, rb_handle)) = player_query.single_mut() {
-        (e, t, d, rb_handle)
+    let (entity, mut player_data) = if let Ok((e, d)) = player_query.single_mut() {
+        (e, d)
     } else {
         return;
     };
@@ -270,72 +307,19 @@ fn try_heal(
         for ui_entity in player_ui_query {
             commands.entity(ui_entity).despawn();
         }
-        crate::systems::menu_ui::setup_ui(&mut commands, &asset_server);
+        crate::systems::menu_ui::setup_pause_menu(&mut commands, &asset_server);
         return;
     }
 
-    if player_data.can_heal.just_finished() && player_data.health < player_data.max_health && player_data.health > 0.0 {
+    if player_data.can_heal.just_finished()
+        && player_data.health < player_data.max_health
+        && player_data.health > 0.0
+    {
         player_data.heal(1.0, &time);
     } else if player_data.health == 0.0 {
-        game_status.0 = false;
-        let mut colliders_clone = Vec::new();
-        if let Some(rb) = rigid_bodies.0.get(handle.0) {
-            for collider_handle in rb.colliders() {
-                colliders_clone.push(collider_handle.clone());
-            }
-        }
-
-        for collider_handle in colliders_clone {
-            colliders.0.remove(collider_handle, &mut island_manager.0, &mut rigid_bodies.0, true);
-        }
-        rigid_bodies.0.remove(
-            handle.0,
-            &mut island_manager.0,
-            &mut colliders.0,
-            &mut ImpulseJointSet::new(),
-            &mut MultibodyJointSet::new(),
-            true, // usuwa powiązane collidery
-        );
-        commands.entity(entity).despawn();
-        for ui_entity in player_ui_query {
-            commands.entity(ui_entity).despawn();
-        }
-        crate::systems::menu_ui::setup_ui(&mut commands, &asset_server);
-        commands.spawn((
-            Camera2d,
-            //SpriteCamera, AnyNormalCamera,
-            MenuCamera
-        ));
-        //commands.spawn((Camera2d, Transform {translation: transform.translation, ..default()}));
-        /*let texture = asset_server.load("textures/player_sprite.png");
-        let layout = TextureAtlasLayout::from_grid(UVec2::splat(64), 2, 2, None, None);
-        let texture_atlas_layout = texture_atlas_layouts.add(layout);
-        let animation_indices = AnimationIndices { first: 0, last: 3 };
-        commands.spawn((
-            Camera2d,
-            Player,
-            Pending,
-            PlayerData::new(),
-            Mesh2d(meshes.add(Rectangle::new(50.0, 25.0))),
-            Transform::from_xyz(
-                0.0,
-                0.0,
-                1.0,
-            ),
-            children![(
-                Sprite::from_atlas_image(
-                    texture,
-                    TextureAtlas {
-                        layout: texture_atlas_layout,
-                        index: animation_indices.first,
-                    },
-                ),
-                Transform::from_xyz(0.0, 43.0, 0.0).with_scale(Vec3::splat(2.5)),
-                animation_indices,
-                AnimationTimer(Timer::from_seconds(0.1, TimerMode::Repeating)),
-                PlayerSprite,
-            )]
-        ));*/
+        // Death is only reported here. What happens next (physics cleanup,
+        // despawn, UI, menu) is decided by the game lifecycle, not by player code.
+        player_died.write(PlayerDied(entity));
         return;
     }
     player_data.can_heal.tick(time.delta());

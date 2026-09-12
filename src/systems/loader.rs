@@ -1,16 +1,15 @@
-use bevy::prelude::*;
-use bevy::mesh::{Mesh, VertexAttributeValues, Indices, PrimitiveTopology};
 use crate::resourses::physics_resources::*;
+use bevy::mesh::{Indices, Mesh, PrimitiveTopology, VertexAttributeValues};
+use bevy::prelude::*;
 
-use rapier2d::prelude::*;
 use rapier2d::na::Point2;
+use rapier2d::prelude::*;
 
 pub struct ObjectsLoaderPlugin;
 
 impl Plugin for ObjectsLoaderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, init)
-            .add_systems(Update, inspect);
+        app.add_systems(Startup, init).add_systems(Update, inspect);
     }
 }
 
@@ -28,7 +27,17 @@ fn init(
 fn inspect(
     mut commands: Commands,
     meshes: Res<Assets<Mesh>>,
-    query: Query<(Entity, &Mesh2d, &Transform, Option<&Player>, Option<&Wall>, Option<&Floor>), With<Pending>>,
+    query: Query<
+        (
+            Entity,
+            &Mesh2d,
+            &Transform,
+            Option<&Player>,
+            Option<&Wall>,
+            Option<&Floor>,
+        ),
+        With<Pending>,
+    >,
     mut rigid_bodies: ResMut<ResRigidBodySet>,
     mut colliders: ResMut<ResColliderSet>,
 ) {
@@ -36,24 +45,37 @@ fn inspect(
         if let Some(mesh) = meshes.get(&mesh_handle.0) {
             if let Some((vertices, indices)) = handle_mesh(mesh, transform) {
                 let rigid_body = if player.is_some() {
-                    RigidBodyBuilder::dynamic().soft_ccd_prediction(0.0).lock_rotations()
+                    RigidBodyBuilder::dynamic()
+                        .soft_ccd_prediction(0.0)
+                        .lock_rotations()
                 } else if wall.is_some() || floor.is_some() {
                     RigidBodyBuilder::fixed()
                 } else {
-                    RigidBodyBuilder::dynamic().soft_ccd_prediction(0.0).lock_rotations()
-                }.translation(vector![transform.translation.x, transform.translation.y])
-                    .build();
+                    RigidBodyBuilder::dynamic()
+                        .soft_ccd_prediction(0.0)
+                        .lock_rotations()
+                }
+                .translation(vector![transform.translation.x, transform.translation.y])
+                .build();
                 let rb_handle = rigid_bodies.0.insert(rigid_body);
-                let collider = ColliderBuilder::trimesh_with_flags(vertices, indices, TriMeshFlags::MERGE_DUPLICATE_VERTICES).expect("REASON")
-                    .restitution(0.0)
-                    .friction(0.5)
-                    .restitution_combine_rule(CoefficientCombineRule::Average)
-                    .friction_combine_rule(CoefficientCombineRule::Average)
-                    .build();
-                let col_handle = colliders.0.insert_with_parent(collider, rb_handle, &mut rigid_bodies.0);
-                commands.entity(entity).insert((
-                    RigidBodyHandleComponent(rb_handle),
-                ));
+                let collider = ColliderBuilder::trimesh_with_flags(
+                    vertices,
+                    indices,
+                    TriMeshFlags::MERGE_DUPLICATE_VERTICES,
+                )
+                .expect("REASON")
+                .restitution(0.0)
+                .friction(0.5)
+                .restitution_combine_rule(CoefficientCombineRule::Average)
+                .friction_combine_rule(CoefficientCombineRule::Average)
+                .build();
+                let col_handle =
+                    colliders
+                        .0
+                        .insert_with_parent(collider, rb_handle, &mut rigid_bodies.0);
+                commands
+                    .entity(entity)
+                    .insert((RigidBodyHandleComponent(rb_handle),));
                 commands.entity(entity).remove::<Pending>();
             }
         }
@@ -66,12 +88,7 @@ fn handle_mesh(mesh: &Mesh, transform: &Transform) -> Option<(Vec<Point2<f32>>, 
     let positions: Vec<Point2<f32>> = match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
         Some(VertexAttributeValues::Float32x3(positions)) => positions
             .iter()
-            .map(|&[x, y, _z]| {
-                Point2::new(
-                    x * scale.x,
-                    y * scale.y,
-                )
-            })
+            .map(|&[x, y, _z]| Point2::new(x * scale.x, y * scale.y))
             .collect(),
         _ => return None,
     };

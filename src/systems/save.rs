@@ -1,0 +1,92 @@
+use crate::resourses::physics_resources::*;
+use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
+
+pub const SAVE_SLOT_COUNT: u8 = 4;
+
+/// Which save slot the current run belongs to, if any. Owned by the game
+/// lifecycle: set when a slot is picked to play, cleared when leaving.
+#[derive(Resource, Default)]
+pub struct ActiveSlot(pub Option<u8>);
+
+/// What must survive across a player death, captured before the dead
+/// player entity is despawned so a later Respawn/Leave can still use it.
+#[derive(Resource, Default)]
+pub struct PendingRespawn {
+    pub inventory: Option<HashMap<u32, Item>>,
+    pub points: u32,
+}
+
+/// Everything a save slot persists. Terrain is not included: it's fully
+/// deterministic from a fixed seed, so it doesn't need to be saved.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct SaveData {
+    pub health: f32,
+    pub max_health: f32,
+    pub satamina: f32,
+    pub min_satamina: f32,
+    pub max_satamina: f32,
+    pub position: (f32, f32),
+    pub inventory: HashMap<u32, Item>,
+    pub points: u32,
+}
+
+fn saves_dir() -> PathBuf {
+    PathBuf::from("saves")
+}
+
+pub fn save_path(slot: u8) -> PathBuf {
+    saves_dir().join(format!("slot_{}.json", slot))
+}
+
+pub fn write_save(slot: u8, data: &SaveData) {
+    let _ = fs::create_dir_all(saves_dir());
+    if let Ok(json) = serde_json::to_string_pretty(data) {
+        let _ = fs::write(save_path(slot), json);
+    }
+}
+
+pub fn read_save(slot: u8) -> Option<SaveData> {
+    let content = fs::read_to_string(save_path(slot)).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+pub fn delete_save(slot: u8) {
+    let _ = fs::remove_file(save_path(slot));
+}
+
+/// Builds a `PlayerData` from saved values, keeping fields that aren't
+/// persisted (timers) at their normal defaults.
+pub fn player_data_from_save(save: &SaveData) -> PlayerData {
+    PlayerData {
+        health: save.health,
+        max_health: save.max_health,
+        inventory: Inventory {
+            items: save.inventory.clone(),
+            capacity: 16,
+        },
+        can_heal: Timer::from_seconds(DEFAULT_HEAL_COOLDOWN_SECONDS, TimerMode::Once),
+        satamina: save.satamina,
+        min_satamina: save.min_satamina,
+        max_satamina: save.max_satamina,
+        time_heal: Timer::from_seconds(0.375, TimerMode::Once),
+        time_satamina: Timer::from_seconds(0.025, TimerMode::Once),
+    }
+}
+
+/// Captures the current player's state into a `SaveData`, for writing to disk.
+pub fn capture_save_data(transform: &Transform, player_data: &PlayerData, points: u32) -> SaveData {
+    SaveData {
+        health: player_data.health,
+        max_health: player_data.max_health,
+        satamina: player_data.satamina,
+        min_satamina: player_data.min_satamina,
+        max_satamina: player_data.max_satamina,
+        position: (transform.translation.x, transform.translation.y),
+        inventory: player_data.inventory.items.clone(),
+        points,
+    }
+}

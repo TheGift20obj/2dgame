@@ -1,207 +1,454 @@
-
-use bevy::prelude::*;
-use bevy::app::AppExit;
 use crate::resourses::physics_resources::*;
-
-use bevy_2d_screen_space_lightmaps::lightmap_plugin::lightmap_plugin::*;
-use bevy::camera::visibility::RenderLayers;
-
-const NORMAL_LIGHT_LAYER_Z: f32 = 0.0;
-const OCCLUDER_LIGHT_LAYER_Z: f32 = 1.0;
-
-const SPRITE_FLOOR_LAYER_Z: f32 = 0.0;
-const SPRITE_OBJECT_LAYER_Z: f32 = 1.0;
+use crate::systems::lifecycle::AppSet;
+use crate::systems::save::{self, ActiveSlot};
+use bevy::app::AppExit;
+use bevy::prelude::*;
 
 const NORMAL_BUTTON: Color = Color::srgb(0.15, 0.15, 0.15);
 const HOVERED_BUTTON: Color = Color::srgb(0.25, 0.25, 0.25);
 const PRESSED_BUTTON: Color = Color::srgb(0.35, 0.75, 0.35);
 pub struct MenuPlugin;
 
+/// Holds a permanent strong handle to the main menu's background texture.
+/// Without this, every despawn of the main menu screen (Leave, BackToMenu)
+/// drops the only strong handle to it, Bevy unloads the image, and the next
+/// `setup_main_menu` call has to re-decode it from disk asynchronously —
+/// the background then visibly pops in after the buttons, which render
+/// immediately since they need no asset load. Keeping one handle alive here
+/// for the app's whole lifetime means the texture is loaded once and every
+/// later `setup_main_menu` call just reuses the already-resident asset.
+#[derive(Resource)]
+pub struct MenuAssets {
+    pub background: Handle<Image>,
+}
+
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(GameStatus(false)).insert_resource(ResumeStatus(false))
+        app.insert_resource(GameStatus(false))
+            .insert_resource(ResumeStatus(false))
             .add_systems(Startup, init)
-           .add_systems(Update, button_system);
+            .add_systems(Update, button_system.in_set(AppSet::UiIntent));
     }
 }
 
 fn init(mut commands: Commands, asset_server: Res<AssetServer>) {
-    setup_ui(&mut commands, &asset_server);
-    commands.spawn((
-        Camera2d,
-        //SpriteCamera, AnyNormalCamera,
-        MenuCamera
-    ));
+    let background = asset_server.load("textures/menu.png");
+    setup_main_menu(&mut commands, &asset_server, background.clone());
+    commands.insert_resource(MenuAssets { background });
+    commands.spawn((Camera2d, MenuCamera));
 }
 
-pub fn setup_ui(commands: &mut Commands, asset_server: &Res<AssetServer>) {
-
-    // font used by buttons
-    let font = asset_server.load("fonts/Cantarell-Bold.ttf");
-
-    // root node: full-screen, centered column
-    commands.spawn((
+fn menu_button_bundle(action: MenuButtonAction) -> impl Bundle {
+    (
+        Button,
         Node {
-            width: Val::Percent(100.0),
-            height: Val::Percent(100.0),
+            width: Val::Px(220.0),
+            height: Val::Px(60.0),
+            margin: UiRect::all(Val::Px(8.0)),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
-            flex_direction: FlexDirection::Column,
-            padding: UiRect::top(Val::Percent(13.5)),
             ..default()
         },
-        ImageNode::new(asset_server.load("textures/menu.png")),
-        MenuRoot,
-    ))
-    .with_children(|parent| {
-        // optional spacer / logo area
-        parent.spawn((
-            Node { margin: UiRect::bottom(Val::Px(20.0)), ..default() },
-        ));
+        BackgroundColor(NORMAL_BUTTON),
+        BorderColor::all(Color::BLACK),
+        MenuButton(action),
+    )
+}
 
-        // buttons (stacked vertically)
-        parent.spawn((
-            Node { margin: UiRect::bottom(Val::Px(20.0)), ..default() },
-        ));
-        parent.spawn((
-            Button,
+fn menu_button_text(label: &str, font: &Handle<Font>) -> impl Bundle {
+    (
+        Text::new(label.to_string()),
+        TextFont {
+            font: font.clone(),
+            font_size: 28.0,
+            ..default()
+        },
+        TextColor(Color::WHITE),
+    )
+}
+
+fn small_button_bundle(action: MenuButtonAction) -> impl Bundle {
+    (
+        Button,
+        Node {
+            width: Val::Px(90.0),
+            height: Val::Px(40.0),
+            margin: UiRect::all(Val::Px(4.0)),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..default()
+        },
+        BackgroundColor(NORMAL_BUTTON),
+        BorderColor::all(Color::BLACK),
+        MenuButton(action),
+    )
+}
+
+fn small_button_text(label: &str, font: &Handle<Font>) -> impl Bundle {
+    (
+        Text::new(label.to_string()),
+        TextFont {
+            font: font.clone(),
+            font_size: 18.0,
+            ..default()
+        },
+        TextColor(Color::WHITE),
+    )
+}
+
+pub fn setup_main_menu(
+    commands: &mut Commands,
+    asset_server: &Res<AssetServer>,
+    background: Handle<Image>,
+) {
+    let font = asset_server.load("fonts/Cantarell-Bold.ttf");
+
+    commands
+        .spawn((
             Node {
-                width: Val::Px(220.0),
-                height: Val::Px(60.0),
-                margin: UiRect::all(Val::Px(8.0)),
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::top(Val::Percent(13.5)),
                 ..default()
             },
-            BackgroundColor(NORMAL_BUTTON),
-            BorderColor::all(Color::BLACK),
-            MenuButton(MenuButtonAction::NewGame),
+            ImageNode::new(background),
+            MenuRoot,
+        ))
+        .with_children(|parent| {
+            parent.spawn((Node {
+                margin: UiRect::bottom(Val::Px(20.0)),
+                ..default()
+            },));
+            parent.spawn((Node {
+                margin: UiRect::bottom(Val::Px(20.0)),
+                ..default()
+            },));
+
+            parent
+                .spawn(menu_button_bundle(MenuButtonAction::Play))
+                .with_children(|p| {
+                    p.spawn(menu_button_text("Play", &font));
+                });
+            parent
+                .spawn(menu_button_bundle(MenuButtonAction::Options))
+                .with_children(|p| {
+                    p.spawn(menu_button_text("Options", &font));
+                });
+            parent
+                .spawn(menu_button_bundle(MenuButtonAction::Exit))
+                .with_children(|p| {
+                    p.spawn(menu_button_text("Exit", &font));
+                });
+        });
+}
+
+pub fn setup_slot_select(commands: &mut Commands, asset_server: &Res<AssetServer>) {
+    let font = asset_server.load("fonts/Cantarell-Bold.ttf");
+
+    commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(14.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.05, 0.05, 0.05, 0.95)),
+            MenuRoot,
         ))
         .with_children(|parent| {
             parent.spawn((
-                Text::new("New Game"),
-                TextFont { font: font.clone(), font_size: 28.0, ..default() },
+                Text::new("Select a Save Slot"),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 32.0,
+                    ..default()
+                },
                 TextColor(Color::WHITE),
+                Node {
+                    margin: UiRect::bottom(Val::Px(10.0)),
+                    ..default()
+                },
             ));
+
+            for slot in 1..=save::SAVE_SLOT_COUNT {
+                let existing = save::read_save(slot);
+                parent
+                    .spawn((Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(10.0),
+                        ..default()
+                    },))
+                    .with_children(|row| match &existing {
+                        Some(data) => {
+                            row.spawn((
+                                Text::new(format!(
+                                    "Slot {}  HP {:.0}/{:.0}  Points {}",
+                                    slot, data.health, data.max_health, data.points
+                                )),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 20.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                                Node {
+                                    width: Val::Px(280.0),
+                                    ..default()
+                                },
+                            ));
+                            row.spawn(small_button_bundle(MenuButtonAction::PlaySlot(slot)))
+                                .with_children(|p| {
+                                    p.spawn(small_button_text("Play", &font));
+                                });
+                            row.spawn(small_button_bundle(MenuButtonAction::ResetSlot(slot)))
+                                .with_children(|p| {
+                                    p.spawn(small_button_text("Reset", &font));
+                                });
+                            row.spawn(small_button_bundle(MenuButtonAction::DeleteSlot(slot)))
+                                .with_children(|p| {
+                                    p.spawn(small_button_text("Delete", &font));
+                                });
+                        }
+                        None => {
+                            row.spawn((
+                                Text::new(format!("Slot {}  Empty", slot)),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 20.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                                Node {
+                                    width: Val::Px(280.0),
+                                    ..default()
+                                },
+                            ));
+                            row.spawn(small_button_bundle(MenuButtonAction::PlaySlot(slot)))
+                                .with_children(|p| {
+                                    p.spawn(small_button_text("Start", &font));
+                                });
+                        }
+                    });
+            }
+
+            parent
+                .spawn(menu_button_bundle(MenuButtonAction::BackToMenu))
+                .with_children(|p| {
+                    p.spawn(menu_button_text("Back", &font));
+                });
         });
-        parent.spawn((
-            Button,
+}
+
+pub fn setup_pause_menu(commands: &mut Commands, asset_server: &Res<AssetServer>) {
+    let font = asset_server.load("fonts/Cantarell-Bold.ttf");
+
+    commands
+        .spawn((
             Node {
-                width: Val::Px(220.0),
-                height: Val::Px(60.0),
-                margin: UiRect::all(Val::Px(8.0)),
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
+                flex_direction: FlexDirection::Column,
                 ..default()
             },
-            BackgroundColor(NORMAL_BUTTON),
-            BorderColor::all(Color::BLACK),
-            MenuButton(MenuButtonAction::LoadGame),
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
+            MenuRoot,
         ))
         .with_children(|parent| {
             parent.spawn((
-                Text::new("Load Game"),
-                TextFont { font: font.clone(), font_size: 28.0, ..default() },
+                Text::new("Paused"),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 32.0,
+                    ..default()
+                },
                 TextColor(Color::WHITE),
+                Node {
+                    margin: UiRect::bottom(Val::Px(16.0)),
+                    ..default()
+                },
             ));
+            parent
+                .spawn(menu_button_bundle(MenuButtonAction::Resume))
+                .with_children(|p| {
+                    p.spawn(menu_button_text("Resume", &font));
+                });
+            parent
+                .spawn(menu_button_bundle(MenuButtonAction::Save))
+                .with_children(|p| {
+                    p.spawn(menu_button_text("Save", &font));
+                });
+            parent
+                .spawn(menu_button_bundle(MenuButtonAction::Leave))
+                .with_children(|p| {
+                    p.spawn(menu_button_text("Leave", &font));
+                });
         });
-        parent.spawn((
-            Button,
+}
+
+pub fn setup_death_screen(commands: &mut Commands, asset_server: &Res<AssetServer>) {
+    let font = asset_server.load("fonts/Cantarell-Bold.ttf");
+
+    commands
+        .spawn((
             Node {
-                width: Val::Px(220.0),
-                height: Val::Px(60.0),
-                margin: UiRect::all(Val::Px(8.0)),
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
+                flex_direction: FlexDirection::Column,
                 ..default()
             },
-            BackgroundColor(NORMAL_BUTTON),
-            BorderColor::all(Color::BLACK),
-            MenuButton(MenuButtonAction::Options),
+            BackgroundColor(Color::srgba(0.2, 0.0, 0.0, 0.75)),
+            MenuRoot,
         ))
         .with_children(|parent| {
             parent.spawn((
-                Text::new("Options"),
-                TextFont { font: font.clone(), font_size: 28.0, ..default() },
+                Text::new("You Died"),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 40.0,
+                    ..default()
+                },
                 TextColor(Color::WHITE),
+                Node {
+                    margin: UiRect::bottom(Val::Px(16.0)),
+                    ..default()
+                },
             ));
+            parent
+                .spawn(menu_button_bundle(MenuButtonAction::Respawn))
+                .with_children(|p| {
+                    p.spawn(menu_button_text("Respawn", &font));
+                });
+            parent
+                .spawn(menu_button_bundle(MenuButtonAction::Leave))
+                .with_children(|p| {
+                    p.spawn(menu_button_text("Leave", &font));
+                });
         });
-        parent.spawn((
-            Button,
-            Node {
-                width: Val::Px(220.0),
-                height: Val::Px(60.0),
-                margin: UiRect::all(Val::Px(8.0)),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            BackgroundColor(NORMAL_BUTTON),
-            BorderColor::all(Color::BLACK),
-            MenuButton(MenuButtonAction::Exit),
-        ))
-        .with_children(|parent| {
-            parent.spawn((
-                Text::new("Exit"),
-                TextFont { font: font.clone(), font_size: 28.0, ..default() },
-                TextColor(Color::WHITE),
-            ));
-        });
-    });
 }
 
 fn button_system(
     mut commands: Commands,
-    mut interaction_query: Query<(&Interaction, &mut BackgroundColor, Option<&MenuButton>), (Changed<Interaction>, With<Button>)>,
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor, Option<&MenuButton>),
+        (Changed<Interaction>, With<Button>),
+    >,
     menu_root_query: Query<Entity, With<MenuRoot>>,
     mut exit: MessageWriter<AppExit>,
-    mut game_status: ResMut<GameStatus>,
-    mut resume_status: ResMut<ResumeStatus>,
-    camera_query: Query<Entity, With<MenuCamera>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
     asset_server: Res<AssetServer>,
-    mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
-    images: Res<Assets<Image>>,
-    config: Res<ItemConfig>,
-    atlas_handles: Res<AtlasHandles>,
+    mut play_requested: MessageWriter<PlayRequested>,
+    mut leave_requested: MessageWriter<LeaveRequested>,
+    mut respawn_requested: MessageWriter<RespawnRequested>,
+    mut resume_status: ResMut<ResumeStatus>,
+    active_slot: Res<ActiveSlot>,
+    player_query: Query<(&Transform, &PlayerData), With<Player>>,
+    points_query: Query<&PointText>,
+    menu_assets: Res<MenuAssets>,
+    mut mouse_input: ResMut<ButtonInput<MouseButton>>,
 ) {
     for (interaction, mut bg_color, menu_button) in &mut interaction_query {
         match *interaction {
             Interaction::Pressed => {
                 *bg_color = PRESSED_BUTTON.into();
                 if let Some(btn) = menu_button {
+                    // This click just landed on a menu button — don't let it also
+                    // register as a world/inventory left-click this same frame.
+                    // Without this, e.g. Resume flips the gameplay gate on and the
+                    // player entity already exists (pause never despawns it), so
+                    // the very click that closed the pause menu would otherwise
+                    // also fire an item-use against whatever slot is selected.
+                    mouse_input.clear_just_pressed(MouseButton::Left);
                     match btn.0 {
-                        MenuButtonAction::NewGame => {
-                            if !game_status.0 {
-                                for root in menu_root_query.iter() {
-                                    commands.entity(root).despawn();
-                                    for entity in camera_query {
-                                        commands.entity(entity).despawn();
-                                    }
-                                    crate::systems::player_game_ui::spawn_health_bar(&mut commands, &asset_server);
-                                    crate::systems::player_game_ui::spawn_inventory_bar(&mut commands, &asset_server);
-                                    crate::systems::player::init(&mut commands, &mut meshes, &mut materials, &asset_server, &mut texture_atlas_layouts, &images, &config, &atlas_handles);
-                                    game_status.0 = true;
-                                }
+                        MenuButtonAction::Play => {
+                            for root in menu_root_query.iter() {
+                                commands.entity(root).despawn();
                             }
+                            setup_slot_select(&mut commands, &asset_server);
+                        }
+                        MenuButtonAction::BackToMenu => {
+                            for root in menu_root_query.iter() {
+                                commands.entity(root).despawn();
+                            }
+                            setup_main_menu(
+                                &mut commands,
+                                &asset_server,
+                                menu_assets.background.clone(),
+                            );
+                        }
+                        MenuButtonAction::PlaySlot(slot) => {
+                            // The lifecycle despawns the slot-select screen and its
+                            // camera itself, in the same batch as spawning the player —
+                            // not here, to avoid a frame with neither in place.
+                            play_requested.write(PlayRequested(slot));
+                        }
+                        MenuButtonAction::ResetSlot(slot) => {
+                            save::delete_save(slot);
+                            for root in menu_root_query.iter() {
+                                commands.entity(root).despawn();
+                            }
+                            setup_slot_select(&mut commands, &asset_server);
+                        }
+                        MenuButtonAction::DeleteSlot(slot) => {
+                            save::delete_save(slot);
+                            for root in menu_root_query.iter() {
+                                commands.entity(root).despawn();
+                            }
+                            setup_slot_select(&mut commands, &asset_server);
                         }
                         MenuButtonAction::Exit => {
-                            // close the app
                             exit.write(AppExit::Success);
                         }
-                        MenuButtonAction::LoadGame => {
-                            if game_status.0 {
-                                resume_status.0 = false;
-                                for root in menu_root_query.iter() {
-                                    commands.entity(root).despawn();
-                                    for entity in camera_query {
-                                        commands.entity(entity).despawn();
-                                    }
-                                }
-                                crate::systems::player_game_ui::spawn_health_bar(&mut commands, &asset_server);
-                                crate::systems::player_game_ui::spawn_inventory_bar(&mut commands, &asset_server);
+                        MenuButtonAction::Resume => {
+                            resume_status.0 = false;
+                            for root in menu_root_query.iter() {
+                                commands.entity(root).despawn();
                             }
+                            // NOTE: this resets the displayed points to 0, matching a
+                            // pre-existing quirk (the points UI entity is destroyed on
+                            // pause and its live value isn't captured) — not fixed here,
+                            // out of scope for this change.
+                            crate::systems::player_game_ui::spawn_health_bar(
+                                &mut commands,
+                                &asset_server,
+                                0,
+                            );
+                            crate::systems::player_game_ui::spawn_inventory_bar(
+                                &mut commands,
+                                &asset_server,
+                            );
+                        }
+                        MenuButtonAction::Save => {
+                            if let Some(slot) = active_slot.0 {
+                                if let Ok((transform, player_data)) = player_query.single() {
+                                    let points =
+                                        points_query.iter().next().map(|p| p.0).unwrap_or(0);
+                                    save::write_save(
+                                        slot,
+                                        &save::capture_save_data(transform, player_data, points),
+                                    );
+                                }
+                            }
+                        }
+                        MenuButtonAction::Leave => {
+                            // The lifecycle despawns this screen and its camera itself,
+                            // in the same batch as spawning the main menu's own.
+                            leave_requested.write(LeaveRequested);
+                        }
+                        MenuButtonAction::Respawn => {
+                            // The lifecycle despawns the death screen and its camera
+                            // itself, in the same batch as spawning the new player.
+                            respawn_requested.write(RespawnRequested);
                         }
                         MenuButtonAction::Options => {
                             // no-op (placeholder)

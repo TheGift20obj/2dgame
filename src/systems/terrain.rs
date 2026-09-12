@@ -1,17 +1,18 @@
-use bevy::prelude::*;
 use crate::resourses::physics_resources::*;
+use crate::systems::physics::remove_rigid_body;
+use bevy::prelude::*;
 
-use noise::{NoiseFn, Fbm, Perlin};
+use noise::{Fbm, NoiseFn, Perlin};
 use std::collections::HashSet;
 
 use rapier2d::prelude::ImpulseJointSet;
 use rapier2d::prelude::MultibodyJointSet;
 
-use bevy_2d_screen_space_lightmaps::lightmap_plugin::lightmap_plugin::*;
 use bevy::camera::visibility::RenderLayers;
+use bevy_2d_screen_space_lightmaps::lightmap_plugin::lightmap_plugin::*;
 
-use std::collections::HashMap;
 use bevy_firefly::prelude::*;
+use std::collections::HashMap;
 
 #[derive(Component, Clone)]
 pub struct GapOccluder;
@@ -27,10 +28,20 @@ pub struct OccluderMeta {
     pub base_half: Vec2,
 }
 
+/// Set true while a Leave-triggered world wipe is in progress and cleared
+/// once it finishes. A single frame is not always enough: any Floor/Wall
+/// still `Pending` must be left alone until `loader::inspect` is done with
+/// it, so the wipe may need to wait a few frames for those to resolve.
+#[derive(Resource, Default)]
+struct TerrainResetPending(bool);
+
 #[derive(Resource, Default)]
 struct TerrainMap {
     generated: HashSet<IVec2>,
-    linked: HashSet<IVec2, Vec<Entity>>,
+    /// Non-wall terrain entities (base Floor/water, and the optional Fog
+    /// overlay) at each generated position. Lets tile lookup/removal be a
+    /// direct map access instead of scanning every terrain entity.
+    floor_entities: HashMap<IVec2, Vec<Entity>>,
     wall_map: HashMap<IVec2, Entity>,
     pub gap_occluders: HashMap<(Entity, Entity), Entity>,
 }
@@ -38,16 +49,15 @@ struct TerrainMap {
 impl TerrainMap {
     /// Tworzy canonical key (A,B) niezależnie od kolejności
     fn canonical_pair(a: Entity, b: Entity) -> (Entity, Entity) {
-        if a.index() < b.index() { (a,b) } else { (b,a) }
+        if a.index() < b.index() {
+            (a, b)
+        } else {
+            (b, a)
+        }
     }
 
     /// Dodaje gap occluder między dwoma ścianami
-    pub fn add_gap_occluder(
-        &mut self,
-        a: Entity,
-        b: Entity,
-        gap_entity: Entity,
-    ) {
+    pub fn add_gap_occluder(&mut self, a: Entity, b: Entity, gap_entity: Entity) {
         let key = Self::canonical_pair(a, b);
         self.gap_occluders.insert(key, gap_entity);
     }
@@ -56,20 +66,23 @@ impl TerrainMap {
     pub fn get_gaps_for_wall(&self, wall: Entity) -> Vec<Entity> {
         self.gap_occluders
             .iter()
-            .filter_map(|(&(a,b), &gap)| if a==wall || b==wall { Some(gap) } else { None })
+            .filter_map(|(&(a, b), &gap)| {
+                if a == wall || b == wall {
+                    Some(gap)
+                } else {
+                    None
+                }
+            })
             .collect()
     }
 
     /// Usuwa wszystkie gapy powiązane z wybraną ścianą
-    pub fn remove_gaps_for_wall(
-        &mut self,
-        wall: Entity,
-        commands: &mut Commands
-    ) {
-        let keys_to_remove: Vec<(Entity,Entity)> = self.gap_occluders
+    pub fn remove_gaps_for_wall(&mut self, wall: Entity, commands: &mut Commands) {
+        let keys_to_remove: Vec<(Entity, Entity)> = self
+            .gap_occluders
             .iter()
-            .filter(|&(&k,_)| k.0 == wall || k.1 == wall)
-            .map(|(&k,_)| k)
+            .filter(|&(&k, _)| k.0 == wall || k.1 == wall)
+            .map(|(&k, _)| k)
             .collect();
 
         for key in keys_to_remove {
@@ -80,12 +93,14 @@ impl TerrainMap {
     }
 
     /// Znajduje sąsiednie ściany w czterech kierunkach (w gridzie)
-    pub fn find_adjacent_walls(
-        &self,
-        wall_pos: IVec2,
-    ) -> Vec<IVec2> {
+    pub fn find_adjacent_walls(&self, wall_pos: IVec2) -> Vec<IVec2> {
         let mut neighbors = Vec::new();
-        let dirs = [IVec2::new((TILE_SIZE as i32),0), IVec2::new((-TILE_SIZE as i32),0), IVec2::new(0,(TILE_SIZE as i32)), IVec2::new(0,(-TILE_SIZE as i32))];
+        let dirs = [
+            IVec2::new((TILE_SIZE as i32), 0),
+            IVec2::new((-TILE_SIZE as i32), 0),
+            IVec2::new(0, (TILE_SIZE as i32)),
+            IVec2::new(0, (-TILE_SIZE as i32)),
+        ];
         for dir in dirs {
             let npos = wall_pos + dir;
             if self.generated.contains(&npos) {
@@ -136,8 +151,16 @@ pub fn add_gap_occluders_for_tile(
         let center_y = (wall_pos.y as f32 + neighbor_pos.y as f32) * 0.5;
 
         // długość gapu = dystans między krawędziami, przyjmujemy tile_size dla prostoty
-        let half_x = if wall_pos.x != neighbor_pos.x { tile_size * 0.5 } else { HALF_TILE.x };
-        let half_y = if wall_pos.y != neighbor_pos.y { tile_size * 0.5 } else { HALF_TILE.y };
+        let half_x = if wall_pos.x != neighbor_pos.x {
+            tile_size * 0.5
+        } else {
+            HALF_TILE.x
+        };
+        let half_y = if wall_pos.y != neighbor_pos.y {
+            tile_size * 0.5
+        } else {
+            HALF_TILE.y
+        };
 
         // wybieramy parenta dla gapu (np wall_entity)
         let parent_entity = wall_entity;
@@ -154,12 +177,14 @@ pub fn add_gap_occluders_for_tile(
         };
 
         // spawn gap occludera
-        let gap_entity = commands.spawn((
-            GapOccluder,
-            gap_transform,
-            Occluder2d::rectangle(half_x, half_y),
-            YSort { z: 0.8 },
-        )).id();
+        let gap_entity = commands
+            .spawn((
+                GapOccluder,
+                gap_transform,
+                Occluder2d::rectangle(half_x, half_y),
+                YSort { z: 0.8 },
+            ))
+            .id();
         //println!("Spawning gap between {:?} and {:?} at local ({}, {})", wall_pos, neighbor_pos, local_x, local_y);
 
         commands.entity(parent_entity).add_children(&[gap_entity]);
@@ -181,9 +206,20 @@ pub struct TerrainGenerationPlugin;
 
 impl Plugin for TerrainGenerationPlugin {
     fn build(&self, app: &mut App) {
-         app.insert_resource(TerrainMap::default())
-            .add_systems(Startup, init_terrain)
-            .add_systems(Update, (update_terrain, animate_sprite, y_sort_relative));
+        app.insert_resource(TerrainMap::default())
+            .insert_resource(TerrainResetPending::default())
+            .add_systems(
+                Update,
+                (update_terrain, animate_sprite, y_sort_relative)
+                    .run_if(|status: Res<GameStatus>, status2: Res<ResumeStatus>| {
+                        status.0 && !status2.0
+                    })
+                    .in_set(crate::systems::lifecycle::AppSet::Gameplay),
+            )
+            .add_systems(
+                Update,
+                handle_world_reset.in_set(crate::systems::lifecycle::AppSet::Lifecycle),
+            );
     }
 }
 
@@ -207,42 +243,83 @@ fn y_sort_relative(
     }
 }
 
-fn y_sort(
-    mut q: Query<(&mut Transform, &YSort)>,
-) {
+fn y_sort(mut q: Query<(&mut Transform, &YSort)>) {
     for (mut tf, ysort) in q.iter_mut() {
-        tf.translation.z = ysort.z-(1.0f32 / (1.0f32 + (2.0f32.powf(-0.01*tf.translation.y))));
+        tf.translation.z = ysort.z - (1.0f32 / (1.0f32 + (2.0f32.powf(-0.01 * tf.translation.y))));
     }
 }
 
-// === GENERACJA STARTOWA ===
-fn init_terrain(
+/// Despawns every terrain-spawned entity (Floor, Wall, Fog, gap occluders,
+/// the fog halo) and clears `TerrainMap`'s tracking state, in reaction to
+/// Leave. Runs ungated (not behind the GameStatus run_if) since it must keep
+/// working across frames while the session is already ending, and it must
+/// finish before the next Play/Respawn's lazy re-init in `update_terrain`
+/// (gated by `terrain_map.generated.is_empty()`) can safely regenerate.
+fn handle_world_reset(
+    mut events: MessageReader<LeaveRequested>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    asset_server: Res<AssetServer>,
-    mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
     mut terrain_map: ResMut<TerrainMap>,
-    query_non_phys: Query<(Entity, &Transform, Option<&Fog>, &Children), (Or<(With<Floor>, With<Wall>)>, Without<RigidBodyHandleComponent>)>,
-    mut sprite_query: Query<&mut Sprite, With<WaterSprite>>,
+    mut reset_pending: ResMut<TerrainResetPending>,
+    mut rigid_bodies: ResMut<ResRigidBodySet>,
+    mut colliders: ResMut<ResColliderSet>,
+    mut island_manager: ResMut<ResIslandManager>,
+    phys_query: Query<
+        (Entity, &RigidBodyHandleComponent),
+        (Or<(With<Floor>, With<Wall>)>, Without<Pending>),
+    >,
+    non_phys_query: Query<
+        Entity,
+        (
+            Or<(With<Floor>, With<Wall>)>,
+            Without<RigidBodyHandleComponent>,
+            Without<Pending>,
+        ),
+    >,
+    any_terrain_query: Query<Entity, Or<(With<Floor>, With<Wall>)>>,
+    halo_query: Query<Entity, With<FogHalo>>,
 ) {
-    let center = IVec2::ZERO;
-    generate_area(
-        &mut commands,
-        &mut meshes,
-        &asset_server,
-        &mut texture_atlas_layouts,
-        &mut terrain_map,
-        center,
-        &query_non_phys,
-        &mut sprite_query,
-    );
-    generate_halo(
-        &mut commands,
-        &mut meshes,
-        &asset_server,
-        &mut texture_atlas_layouts,
-        center,
-    );
+    let mut requested = false;
+    for _ in events.read() {
+        requested = true;
+    }
+    if requested {
+        reset_pending.0 = true;
+    }
+    if !reset_pending.0 {
+        return;
+    }
+
+    for (entity, handle) in &phys_query {
+        remove_rigid_body(
+            &mut rigid_bodies,
+            &mut colliders,
+            &mut island_manager,
+            handle.0,
+        );
+        commands.entity(entity).despawn();
+    }
+    for entity in &non_phys_query {
+        commands.entity(entity).despawn();
+    }
+
+    // Anything still `Pending` is mid-flight through `loader::inspect`;
+    // despawning it here would race that system touching the same entity
+    // this frame (the root cause of an earlier crash). Wait for it to clear
+    // on its own (inspect removes `Pending` once physics is attached, and
+    // the sweep above then despawns it on a later frame) before wiping the
+    // halo and tracking state.
+    if any_terrain_query.iter().next().is_some() {
+        return;
+    }
+
+    for entity in &halo_query {
+        commands.entity(entity).despawn();
+    }
+    terrain_map.generated.clear();
+    terrain_map.floor_entities.clear();
+    terrain_map.wall_map.clear();
+    terrain_map.gap_occluders.clear();
+    reset_pending.0 = false;
 }
 
 fn update_terrain(
@@ -257,15 +334,61 @@ fn update_terrain(
     mut colliders: ResMut<ResColliderSet>,
     mut rigid_bodies: ResMut<ResRigidBodySet>,
     mut island_manager: ResMut<ResIslandManager>,
-    query_phys: Query<(Entity, &Transform, &RigidBodyHandleComponent), Or<(With<Floor>, With<Wall>)>>,
-    query_non_phys: Query<(Entity, &Transform, Option<&Fog>, &Children), (Or<(With<Floor>, With<Wall>)>, Without<RigidBodyHandleComponent>)>,
-    mut halo_query: Query<&mut Transform, (With<FogHalo>, Without<Floor>, Without<Wall>, Without<Player>)>,
+    query_phys: Query<
+        (Entity, &Transform, &RigidBodyHandleComponent),
+        Or<(With<Floor>, With<Wall>)>,
+    >,
+    query_non_phys: Query<
+        (Entity, &Transform, Option<&Fog>, &Children),
+        (
+            Or<(With<Floor>, With<Wall>)>,
+            Without<RigidBodyHandleComponent>,
+            Without<Pending>,
+        ),
+    >,
+    mut halo_query: Query<
+        &mut Transform,
+        (
+            With<FogHalo>,
+            Without<Floor>,
+            Without<Wall>,
+            Without<Player>,
+        ),
+    >,
+    pending_query: Query<&Transform, (With<Pending>, Or<(With<Floor>, With<Wall>)>)>,
 ) {
     let player_transform = if let Ok(d) = player_q.single() {
         d
     } else {
         return;
     };
+
+    // First tick of a fresh session (also right after a Leave-triggered
+    // wipe clears `generated`): generate the starting area and its halo
+    // instead of relying on a Startup system, so terrain never exists
+    // before a player actually does.
+    if terrain_map.generated.is_empty() {
+        let center = IVec2::ZERO;
+        generate_area(
+            &mut commands,
+            &mut meshes,
+            &asset_server,
+            &mut texture_atlas_layouts,
+            &mut terrain_map,
+            center,
+            &query_non_phys,
+            &mut sprite_query,
+        );
+        generate_halo(
+            &mut commands,
+            &mut meshes,
+            &asset_server,
+            &mut texture_atlas_layouts,
+            center,
+        );
+        return;
+    }
+
     let mut halo_transform = if let Ok(mut d) = halo_query.single_mut() {
         d
     } else {
@@ -278,7 +401,7 @@ fn update_terrain(
     );
     halo_transform.translation.x = center.x as f32;
     halo_transform.translation.y = center.y as f32;
-    halo_transform.translation.z = player_transform.translation.z+3.14;
+    halo_transform.translation.z = player_transform.translation.z + 3.14;
     // === Dodaj nowy teren ===
     generate_area(
         &mut commands,
@@ -298,15 +421,31 @@ fn update_terrain(
         let dx = pos.x - center.x;
         let dy = pos.y - center.y;
         let r = (dx * dx + dy * dy);
-        if r > (radius*radius)/25 {
+        if r > (radius * radius) / 25 {
             to_remove.push(pos);
         }
     }
 
+    // Positions that still have a `Pending` Floor/Wall (not yet processed by
+    // loader::inspect) must not be touched by removal this frame — despawning
+    // one here would race with loader::inspect, which may still queue commands
+    // against the same entity in the same frame. Computed once, not per-tile.
+    let pending_positions: HashSet<IVec2> = pending_query
+        .iter()
+        .map(|t| IVec2::new(t.translation.x as i32, t.translation.y as i32))
+        .collect();
+
     for pos in to_remove {
+        if pending_positions.contains(&pos) {
+            // Leave it fully alone (entity, tracking, and `generated`) — it
+            // will be reconsidered on a later pass once physics is attached.
+            continue;
+        }
+
         // usuń encje w tym kafelku
         for (entity, transform, handle) in query_phys.iter() {
-            if !(transform.translation.x as i32 == pos.x && transform.translation.y as i32 == pos.y) {
+            if !(transform.translation.x as i32 == pos.x && transform.translation.y as i32 == pos.y)
+            {
                 continue;
             }
             let mut colliders_clone = Vec::new();
@@ -317,7 +456,12 @@ fn update_terrain(
             }
 
             for collider_handle in colliders_clone {
-                colliders.0.remove(collider_handle, &mut island_manager.0, &mut rigid_bodies.0, true);
+                colliders.0.remove(
+                    collider_handle,
+                    &mut island_manager.0,
+                    &mut rigid_bodies.0,
+                    true,
+                );
             }
             rigid_bodies.0.remove(
                 handle.0,
@@ -332,11 +476,10 @@ fn update_terrain(
             commands.entity(entity).despawn();
         }
 
-        for (entity, transform, _, _) in query_non_phys.iter() {
-            if !(transform.translation.x as i32 == pos.x && transform.translation.y as i32 == pos.y) {
-                continue;
+        if let Some(entities) = terrain_map.floor_entities.remove(&pos) {
+            for entity in entities {
+                commands.entity(entity).despawn();
             }
-            commands.entity(entity).despawn();
         }
 
         terrain_map.generated.remove(&pos);
@@ -350,15 +493,22 @@ fn generate_area(
     texture_atlas_layouts: &mut ResMut<Assets<TextureAtlasLayout>>,
     terrain_map: &mut ResMut<TerrainMap>,
     center: IVec2,
-    query_non_phys: &Query<(Entity, &Transform, Option<&Fog>, &Children), (Or<(With<Floor>, With<Wall>)>, Without<RigidBodyHandleComponent>)>,
+    query_non_phys: &Query<
+        (Entity, &Transform, Option<&Fog>, &Children),
+        (
+            Or<(With<Floor>, With<Wall>)>,
+            Without<RigidBodyHandleComponent>,
+            Without<Pending>,
+        ),
+    >,
     sprite_query: &mut Query<&mut Sprite, With<WaterSprite>>,
 ) {
     let terrain_noise = Fbm::<Perlin>::new(921925);
     let path_noise = Fbm::<Perlin>::new(5342756);
     let biome_noise = Fbm::<Perlin>::new(2683467); // nowy noise dla biomów
 
-    let world_size_x = WORLD_SIZE/3;
-    let world_size_y = WORLD_SIZE/3;
+    let world_size_x = WORLD_SIZE / 3;
+    let world_size_y = WORLD_SIZE / 3;
     let tile_size = TILE_SIZE;
     let radius = WORLD_SIZE as f32;
     let x_offset = (world_size_x as f32 * tile_size) / 2.0;
@@ -376,22 +526,26 @@ fn generate_area(
 
     for gx in 0..world_size_x {
         for gy in 0..world_size_y {
-            let dist2 = ((gx as f32 - x_offset/tile_size) * (gx as f32 - x_offset/tile_size) + (gy as f32 - y_offset/tile_size) * (gy as f32 - y_offset/tile_size)) as f32;
-            if !(dist2*dist2 <= radius * radius) {
+            let dist2 = ((gx as f32 - x_offset / tile_size) * (gx as f32 - x_offset / tile_size)
+                + (gy as f32 - y_offset / tile_size) * (gy as f32 - y_offset / tile_size))
+                as f32;
+            if !(dist2 * dist2 <= radius * radius) {
                 continue;
             }
             let x = gx as f32 * tile_size - x_offset + center.x as f32;
             let y = gy as f32 * tile_size - y_offset + center.y as f32;
-            
+
             let pos = IVec2::new(x as i32, y as i32);
-            let t = ((dist2*dist2) / (radius-16.0).powi(2)).clamp(0.0, 1.0);
+            let t = ((dist2 * dist2) / (radius - 16.0).powi(2)).clamp(0.0, 1.0);
             let k = 0.25; // <1 → szybszy wzrost przezroczystości
             let transp = t.powf(k);
             if terrain_map.generated.contains(&pos) {
-                if dist2*dist2 < 0.0 {
+                if dist2 * dist2 < 0.0 {
                     for (entity, transform, fog, _) in query_non_phys.iter() {
                         if fog.is_some() {
-                            if !(transform.translation.x as i32 == pos.x && transform.translation.y as i32 == pos.y) {
+                            if !(transform.translation.x as i32 == pos.x
+                                && transform.translation.y as i32 == pos.y)
+                            {
                                 continue;
                             }
                             commands.entity(entity).despawn();
@@ -399,44 +553,58 @@ fn generate_area(
                     }
                 } else {
                     let mut exits = false;
-                    for (entity, transform, fog, children) in query_non_phys.iter() {
-                        if fog.is_some() {
-                            if (transform.translation.x as i32 == pos.x && transform.translation.y as i32 == pos.y) {
-                                exits = true;
-                                for child in children.iter() {
-                                    if let Ok(mut sprite) = sprite_query.get_mut(child) {
-                                        sprite.color = Color::srgba(0.25, 0.25, 0.25, transp);
+                    if let Some(candidates) = terrain_map.floor_entities.get(&pos) {
+                        for &candidate in candidates {
+                            if let Ok((_, _, fog, children)) = query_non_phys.get(candidate) {
+                                if fog.is_some() {
+                                    exits = true;
+                                    for child in children.iter() {
+                                        if let Ok(mut sprite) = sprite_query.get_mut(child) {
+                                            sprite.color = Color::srgba(0.25, 0.25, 0.25, transp);
+                                        }
                                     }
+                                    break;
                                 }
                             }
                         }
                     }
                     if !exits {
-                        commands.spawn((
-                            Floor, Fog,
-                            Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
-                            //Transform::from_xyz(x, y, 3.14 + -(g_offset/64.0 + y/64.0)+64.0),
-                            Transform::from_xyz(x, y, 100.0),
-                            children![(
-                                {
-                                    let mut s = Sprite::from_atlas_image(
-                                        fog_texture.clone(),
-                                        TextureAtlas { layout: fog_atlas.clone(), index: 0 },
-                                    );
-                                    s.color = Color::srgba(0.25, 0.25, 0.25, transp); // odcień szarości + alfa
-                                    s
-                                },
-                                Transform {
-                                    scale: Vec3::new(tile_size / 32.0, tile_size / 32.0, 0.0),
-                                    ..Default::default()
-                                },
-                                Visibility::Inherited,
-                                RenderLayers::from_layers(CAMERA_LAYER_EFFECT),
-                                AnimationIndices { first: 0, last: 3 },
-                                AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
-                                WaterSprite,
-                            )],
-                        ));
+                        let fog_entity = commands
+                            .spawn((
+                                Floor,
+                                Fog,
+                                Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
+                                //Transform::from_xyz(x, y, 3.14 + -(g_offset/64.0 + y/64.0)+64.0),
+                                Transform::from_xyz(x, y, 100.0),
+                                children![(
+                                    {
+                                        let mut s = Sprite::from_atlas_image(
+                                            fog_texture.clone(),
+                                            TextureAtlas {
+                                                layout: fog_atlas.clone(),
+                                                index: 0,
+                                            },
+                                        );
+                                        s.color = Color::srgba(0.25, 0.25, 0.25, transp); // odcień szarości + alfa
+                                        s
+                                    },
+                                    Transform {
+                                        scale: Vec3::new(tile_size / 32.0, tile_size / 32.0, 0.0),
+                                        ..Default::default()
+                                    },
+                                    Visibility::Inherited,
+                                    RenderLayers::from_layers(CAMERA_LAYER_EFFECT),
+                                    AnimationIndices { first: 0, last: 3 },
+                                    AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
+                                    WaterSprite,
+                                )],
+                            ))
+                            .id();
+                        terrain_map
+                            .floor_entities
+                            .entry(pos)
+                            .or_default()
+                            .push(fog_entity);
                     }
                 }
                 continue;
@@ -444,11 +612,15 @@ fn generate_area(
 
             terrain_map.generated.insert(pos);
             // === wybór biomu ===
-            let biome_val = biome_noise.get([(x / tile_size) as f64 / 128.0, (y / tile_size) as f64 / 128.0]);
+            let biome_val = biome_noise.get([
+                (x / tile_size) as f64 / 128.0,
+                (y / tile_size) as f64 / 128.0,
+            ]);
             let biome = "normal";
 
             // === noise terenu w obrębie biomu ===
-            let terrain_val = terrain_noise.get([(x / tile_size) as f64 / 15.0, (y / tile_size) as f64 / 15.0]);
+            let terrain_val =
+                terrain_noise.get([(x / tile_size) as f64 / 15.0, (y / tile_size) as f64 / 15.0]);
 
             let mut texture_path = match biome {
                 "snow" => {
@@ -498,105 +670,135 @@ fn generate_area(
             }
 
             // === Spawn Floor ===
-            if texture_path == "textures/water" {
+            let floor_entity = if texture_path == "textures/water" {
                 // woda animowana
-                let entity =commands.spawn((
-                    Floor,
-                    Pending,
-                    Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
-                    //Transform::from_xyz(x, y, -3.0 + -(g_offset/64.0 + y/64.0)+64.0),
-                    Transform::from_xyz(x, y, -64.0),
-                    children![(
-                        Sprite::from_atlas_image(
-                            water_texture.clone(),
-                            TextureAtlas {
-                                layout: water_atlas.clone(),
-                                index: 0,
+                commands
+                    .spawn((
+                        Floor,
+                        Pending,
+                        Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
+                        //Transform::from_xyz(x, y, -3.0 + -(g_offset/64.0 + y/64.0)+64.0),
+                        Transform::from_xyz(x, y, -64.0),
+                        children![(
+                            Sprite::from_atlas_image(
+                                water_texture.clone(),
+                                TextureAtlas {
+                                    layout: water_atlas.clone(),
+                                    index: 0,
+                                },
+                            ),
+                            Transform {
+                                scale: Vec3::new(tile_size / 32.0, tile_size / 32.0, 1.0),
+                                ..Default::default()
                             },
-                        ),
-                        Transform {
-                            scale: Vec3::new(tile_size / 32.0, tile_size / 32.0, 1.0),
-                            ..Default::default()
-                        },
-                        YSort { z: 0.0 },
-                        AnimationIndices { first: 0, last: 3 },
-                        AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
-                        WaterSprite,
-                        RenderLayers::from_layers(CAMERA_LAYER_FLOOR)
-                    )],
-                ));
+                            YSort { z: 0.0 },
+                            AnimationIndices { first: 0, last: 3 },
+                            AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
+                            WaterSprite,
+                            RenderLayers::from_layers(CAMERA_LAYER_FLOOR)
+                        )],
+                    ))
+                    .id()
             } else {
-                commands.spawn((
-                    Floor,
-                    Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
-                    //Transform::from_xyz(x, y, -3.0 + -(g_offset/64.0 + y/64.0)+64.0),
-                    Transform::from_xyz(x, y, -64.0),
-                    children![(
-                        Sprite::from_image(asset_server.load(texture_path)),
-                        YSort { z: 0.0 },
-                        Transform {
-                            scale: Vec3::new(tile_size / 32.0, tile_size / 32.0, 1.0),
-                            ..Default::default()
-                        },
-                        RenderLayers::from_layers(CAMERA_LAYER_FLOOR)
-                    )],
-                ));
-            }
+                commands
+                    .spawn((
+                        Floor,
+                        Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
+                        //Transform::from_xyz(x, y, -3.0 + -(g_offset/64.0 + y/64.0)+64.0),
+                        Transform::from_xyz(x, y, -64.0),
+                        children![(
+                            Sprite::from_image(asset_server.load(texture_path)),
+                            YSort { z: 0.0 },
+                            Transform {
+                                scale: Vec3::new(tile_size / 32.0, tile_size / 32.0, 1.0),
+                                ..Default::default()
+                            },
+                            RenderLayers::from_layers(CAMERA_LAYER_FLOOR)
+                        )],
+                    ))
+                    .id()
+            };
+            terrain_map
+                .floor_entities
+                .entry(pos)
+                .or_default()
+                .push(floor_entity);
 
             // === Ściany tylko na stone/evil_stone ===
             if texture_path == "textures/stone.png" || texture_path == "textures/evil_stone.png" {
-                let wall_val = terrain_noise.get([(x / tile_size) as f64 / 6.0, (y / tile_size) as f64 / 6.0, 999.0]);
+                let wall_val = terrain_noise.get([
+                    (x / tile_size) as f64 / 6.0,
+                    (y / tile_size) as f64 / 6.0,
+                    999.0,
+                ]);
                 if wall_val > 0.0 {
-                    let wall_entity = spawn_wall(commands, meshes, asset_server, x, y, tile_size, g_offset);
+                    let wall_entity =
+                        spawn_wall(commands, meshes, asset_server, x, y, tile_size, g_offset);
                     terrain_map.wall_map.insert(pos, wall_entity);
                     add_gap_occluders_for_tile(commands, terrain_map, pos, tile_size);
                 }
             }
 
-            if dist2*dist2 >= 0.0 {
+            if dist2 * dist2 >= 0.0 {
                 let mut exits = false;
-                for (entity, transform, fog, children) in query_non_phys.iter() {
-                    if fog.is_some() {
-                        if (transform.translation.x as i32 == pos.x && transform.translation.y as i32 == pos.y) {
-                            exits = true;
-                            for child in children.iter() {
-                                if let Ok(mut sprite) = sprite_query.get_mut(child) {
-                                    sprite.color = Color::srgba(0.25, 0.25, 0.25, transp);
+                if let Some(candidates) = terrain_map.floor_entities.get(&pos) {
+                    for &candidate in candidates {
+                        if let Ok((_, _, fog, children)) = query_non_phys.get(candidate) {
+                            if fog.is_some() {
+                                exits = true;
+                                for child in children.iter() {
+                                    if let Ok(mut sprite) = sprite_query.get_mut(child) {
+                                        sprite.color = Color::srgba(0.25, 0.25, 0.25, transp);
+                                    }
                                 }
+                                break;
                             }
                         }
                     }
                 }
                 if !exits {
-                    commands.spawn((
-                        Floor, Fog,
-                        Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
-                        //Transform::from_xyz(x, y, 3.14 + -(g_offset/64.0 + y/64.0)+64.0),
-                        Transform::from_xyz(x, y, 0.0),
-                        children![(
-                            {
-                                let mut s = Sprite::from_atlas_image(
-                                    fog_texture.clone(),
-                                    TextureAtlas { layout: fog_atlas.clone(), index: 0 },
-                                );
-                                s.color = Color::srgba(0.25, 0.25, 0.25, transp); // odcień szarości + alfa
-                                s
-                            },
-                            Transform {
-                                scale: Vec3::new(tile_size / 32.0, tile_size / 32.0, 1.0),
-                                ..Default::default()
-                            },
-                            AnimationIndices { first: 0, last: 3 },
-                            AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
-                            WaterSprite,
-                            RenderLayers::from_layers(CAMERA_LAYER_EFFECT),
-                        )],
-                    ));
+                    let fog_entity = commands
+                        .spawn((
+                            Floor,
+                            Fog,
+                            Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
+                            //Transform::from_xyz(x, y, 3.14 + -(g_offset/64.0 + y/64.0)+64.0),
+                            Transform::from_xyz(x, y, 0.0),
+                            children![(
+                                {
+                                    let mut s = Sprite::from_atlas_image(
+                                        fog_texture.clone(),
+                                        TextureAtlas {
+                                            layout: fog_atlas.clone(),
+                                            index: 0,
+                                        },
+                                    );
+                                    s.color = Color::srgba(0.25, 0.25, 0.25, transp); // odcień szarości + alfa
+                                    s
+                                },
+                                Transform {
+                                    scale: Vec3::new(tile_size / 32.0, tile_size / 32.0, 1.0),
+                                    ..Default::default()
+                                },
+                                AnimationIndices { first: 0, last: 3 },
+                                AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
+                                WaterSprite,
+                                RenderLayers::from_layers(CAMERA_LAYER_EFFECT),
+                            )],
+                        ))
+                        .id();
+                    terrain_map
+                        .floor_entities
+                        .entry(pos)
+                        .or_default()
+                        .push(fog_entity);
                 }
             } else {
                 for (entity, transform, fog, _) in query_non_phys.iter() {
                     if fog.is_some() {
-                        if !(transform.translation.x as i32 == pos.x && transform.translation.y as i32 == pos.y) {
+                        if !(transform.translation.x as i32 == pos.x
+                            && transform.translation.y as i32 == pos.y)
+                        {
                             continue;
                         }
                         commands.entity(entity).despawn();
@@ -618,47 +820,67 @@ fn spawn_wall(
 ) -> Entity {
     //let half = Vec2::splat(tile_size);
     let child_local = Transform::from_xyz(TR_LOCAL.x, TR_LOCAL.y, 0.0);
-    return commands.spawn((
-        Wall,
-        Pending,
-        Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
-        Transform::from_xyz(x, y, -32.0),
-        children![(
-            child_local,
-            Occluder2d::rectangle(HALF_TILE.x, HALF_TILE.y),
-            //OccluderMeta { base_local: child_local, base_half: half },
-            YSort { z: 0.8 },
-        ),(
-            Occluder2d::rectangle(tile_size, tile_size),
-            //OccluderMeta { base_local: child_local, base_half: half },
-            YSort { z: -8.0 },
-        ),
-        (
-            RenderLayers::from_layers(CAMERA_LAYER_WALL),
-            YSort { z: 0.3 },
-            Sprite::from_image(asset_server.load("textures/main_wall.png")),
-            Transform::from_xyz(0.0, 0.0, 0.0)
-                .with_scale(Vec3::new(tile_size / 32.0, tile_size / 32.0, 1.0)),
-        ),(
-            RenderLayers::from_layers(CAMERA_LAYER_WALL),
-            YSort { z: 0.31 },
-            Sprite::from_image(asset_server.load("textures/side_wall.png")),
-            Transform::from_xyz(-tile_size, 0.0, 0.0)
-                .with_scale(Vec3::new(tile_size / 32.0, tile_size / 32.0, 1.0)),
-        ),(
-            RenderLayers::from_layers(CAMERA_LAYER_WALL),
-            YSort { z: 0.49 },
-            Sprite::from_image(asset_server.load("textures/up_wall.png")),
-            Transform::from_xyz(0.0, tile_size, 0.0)
-                .with_scale(Vec3::new(tile_size / 32.0, tile_size / 32.0, 1.0)),
-        ),(
-            RenderLayers::from_layers(CAMERA_LAYER_WALL),
-            YSort { z: 0.49 },
-            Sprite::from_image(asset_server.load("textures/corner_wall.png")),
-            Transform::from_xyz(-tile_size, tile_size, 0.0)
-                .with_scale(Vec3::new(tile_size / 32.0, tile_size / 32.0, 1.0)),
-        )],
-    )).id();
+    return commands
+        .spawn((
+            Wall,
+            Pending,
+            Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
+            Transform::from_xyz(x, y, -32.0),
+            children![
+                (
+                    child_local,
+                    Occluder2d::rectangle(HALF_TILE.x, HALF_TILE.y),
+                    //OccluderMeta { base_local: child_local, base_half: half },
+                    YSort { z: 0.8 },
+                ),
+                (
+                    Occluder2d::rectangle(tile_size, tile_size),
+                    //OccluderMeta { base_local: child_local, base_half: half },
+                    YSort { z: -8.0 },
+                ),
+                (
+                    RenderLayers::from_layers(CAMERA_LAYER_WALL),
+                    YSort { z: 0.3 },
+                    Sprite::from_image(asset_server.load("textures/main_wall.png")),
+                    Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::new(
+                        tile_size / 32.0,
+                        tile_size / 32.0,
+                        1.0
+                    )),
+                ),
+                (
+                    RenderLayers::from_layers(CAMERA_LAYER_WALL),
+                    YSort { z: 0.31 },
+                    Sprite::from_image(asset_server.load("textures/side_wall.png")),
+                    Transform::from_xyz(-tile_size, 0.0, 0.0).with_scale(Vec3::new(
+                        tile_size / 32.0,
+                        tile_size / 32.0,
+                        1.0
+                    )),
+                ),
+                (
+                    RenderLayers::from_layers(CAMERA_LAYER_WALL),
+                    YSort { z: 0.49 },
+                    Sprite::from_image(asset_server.load("textures/up_wall.png")),
+                    Transform::from_xyz(0.0, tile_size, 0.0).with_scale(Vec3::new(
+                        tile_size / 32.0,
+                        tile_size / 32.0,
+                        1.0
+                    )),
+                ),
+                (
+                    RenderLayers::from_layers(CAMERA_LAYER_WALL),
+                    YSort { z: 0.49 },
+                    Sprite::from_image(asset_server.load("textures/corner_wall.png")),
+                    Transform::from_xyz(-tile_size, tile_size, 0.0).with_scale(Vec3::new(
+                        tile_size / 32.0,
+                        tile_size / 32.0,
+                        1.0
+                    )),
+                )
+            ],
+        ))
+        .id();
 }
 
 fn generate_halo(
@@ -668,8 +890,8 @@ fn generate_halo(
     texture_atlas_layouts: &mut ResMut<Assets<TextureAtlasLayout>>,
     center: IVec2,
 ) {
-    let world_size_x = WORLD_SIZE/3;
-    let world_size_y = WORLD_SIZE/3;
+    let world_size_x = WORLD_SIZE / 3;
+    let world_size_y = WORLD_SIZE / 3;
     let tile_size = TILE_SIZE;
     let radius = WORLD_SIZE as f32;
     let x_offset = (world_size_x as f32 * tile_size) / 2.0;
@@ -681,47 +903,67 @@ fn generate_halo(
     let water_layout = TextureAtlasLayout::from_grid(UVec2::splat(32), 2, 2, None, None);
     let water_atlas = texture_atlas_layouts.add(water_layout);
 
-    commands.spawn((FogHalo, Transform::from_xyz(0.0, 0.0, 3.14), InheritedVisibility::default())).with_children(|parent| {
-        for gx in 0..world_size_x {
-            for gy in 0..world_size_y {
-                let dist2 = ((gx as f32 - x_offset/tile_size) * (gx as f32 - x_offset/tile_size) + (gy as f32 - y_offset/tile_size) * (gy as f32 - y_offset/tile_size)) as f32;
-                if !(dist2*dist2 <= radius * radius) {
-                    let x = gx as f32 * tile_size - x_offset + center.x as f32;
-                    let y = gy as f32 * tile_size - y_offset + center.y as f32;
+    commands
+        .spawn((
+            FogHalo,
+            Transform::from_xyz(0.0, 0.0, 3.14),
+            InheritedVisibility::default(),
+        ))
+        .with_children(|parent| {
+            for gx in 0..world_size_x {
+                for gy in 0..world_size_y {
+                    let dist2 = ((gx as f32 - x_offset / tile_size)
+                        * (gx as f32 - x_offset / tile_size)
+                        + (gy as f32 - y_offset / tile_size) * (gy as f32 - y_offset / tile_size))
+                        as f32;
+                    if !(dist2 * dist2 <= radius * radius) {
+                        let x = gx as f32 * tile_size - x_offset + center.x as f32;
+                        let y = gy as f32 * tile_size - y_offset + center.y as f32;
 
-                    parent.spawn((
-                        Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
-                        //Transform::from_xyz(x, y, -(g_offset/64.0 + y/64.0)+64.0),
-                        Transform::from_xyz(x, y, -32.0),
-                         //RenderLayers::from_layers(CAMERA_LAYER_SPRITE),
-                        children![(
-                            {
-                                let mut s = Sprite::from_atlas_image(
-                                    water_texture.clone(),
-                                    TextureAtlas { layout: water_atlas.clone(), index: 0 },
-                                );
-                                s.color = Color::srgba(0.25, 0.25, 0.25, 1.0); // odcień szarości + alfa
-                                s
-                            },
+                        parent.spawn((
+                            Mesh2d(meshes.add(Rectangle::new(tile_size, tile_size))),
+                            //Transform::from_xyz(x, y, -(g_offset/64.0 + y/64.0)+64.0),
+                            Transform::from_xyz(x, y, -32.0),
+                            //RenderLayers::from_layers(CAMERA_LAYER_SPRITE),
+                            children![(
+                                {
+                                    let mut s = Sprite::from_atlas_image(
+                                        water_texture.clone(),
+                                        TextureAtlas {
+                                            layout: water_atlas.clone(),
+                                            index: 0,
+                                        },
+                                    );
+                                    s.color = Color::srgba(0.25, 0.25, 0.25, 1.0); // odcień szarości + alfa
+                                    s
+                                },
                                 RenderLayers::from_layers(CAMERA_LAYER_EFFECT),
-                            Transform {
-                                scale: Vec3::new(tile_size / 32.0, tile_size / 32.0, 1.0),
-                                ..Default::default()
-                            },
-                            AnimationIndices { first: 0, last: 3 },
-                            AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
-                            WaterSprite,
-                        )],
-                    ));
+                                Transform {
+                                    scale: Vec3::new(tile_size / 32.0, tile_size / 32.0, 1.0),
+                                    ..Default::default()
+                                },
+                                AnimationIndices { first: 0, last: 3 },
+                                AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
+                                WaterSprite,
+                            )],
+                        ));
+                    }
                 }
             }
-        }
-    });
+        });
 }
 
 fn animate_sprite(
     time: Res<Time>,
-    mut query: Query<(&AnimationIndices, &mut AnimationTimer, &mut Sprite, &mut Transform), With<WaterSprite>>,
+    mut query: Query<
+        (
+            &AnimationIndices,
+            &mut AnimationTimer,
+            &mut Sprite,
+            &mut Transform,
+        ),
+        With<WaterSprite>,
+    >,
 ) {
     for (indices, mut timer, mut sprite, mut transform) in &mut query {
         timer.tick(time.delta());

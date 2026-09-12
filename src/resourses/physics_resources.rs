@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use rapier2d::prelude::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Resource)]
@@ -70,9 +70,7 @@ pub struct AnimationIndices {
 }
 
 #[derive(Resource)]
-pub struct AtlasHandles (
-    pub HashMap<String, AnimationIndices>,
-);
+pub struct AtlasHandles(pub HashMap<String, AnimationIndices>);
 
 #[derive(Component, Deref, DerefMut)]
 pub struct AnimationTimer(pub Timer);
@@ -115,7 +113,7 @@ pub struct ItemConfig {
     pub items: HashMap<String, Item>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Item {
     pub id: String,
     pub path: String,
@@ -200,6 +198,10 @@ pub struct PlayerData {
     pub time_satamina: Timer,
 }
 
+/// Starting heal-cooldown duration for a new/respawned player. Named so the
+/// (non-π) 3.14 literal only needs to exist in one place.
+pub const DEFAULT_HEAL_COOLDOWN_SECONDS: f32 = 3.14;
+
 impl PlayerData {
     pub fn new(config: &Res<ItemConfig>) -> Self {
         let mut inventory = Inventory::new();
@@ -208,12 +210,29 @@ impl PlayerData {
             health: 100.0,
             max_health: 100.0,
             inventory: inventory,
-            can_heal: Timer::from_seconds(3.14, TimerMode::Once),
+            can_heal: Timer::from_seconds(DEFAULT_HEAL_COOLDOWN_SECONDS, TimerMode::Once),
             satamina: 360.0,
             min_satamina: 25.0,
             max_satamina: 360.0,
             time_heal: Timer::from_seconds(0.375, TimerMode::Once),
-            time_satamina: Timer::from_seconds(0.025, TimerMode::Once)
+            time_satamina: Timer::from_seconds(0.025, TimerMode::Once),
+        }
+    }
+
+    /// Same starting stats as `new`, but with a caller-supplied inventory
+    /// instead of the config-based starting items. Used when the player
+    /// keeps their inventory across a respawn/leave instead of starting over.
+    pub fn respawn_with_inventory(inventory: Inventory) -> Self {
+        Self {
+            health: 100.0,
+            max_health: 100.0,
+            inventory,
+            can_heal: Timer::from_seconds(DEFAULT_HEAL_COOLDOWN_SECONDS, TimerMode::Once),
+            satamina: 360.0,
+            min_satamina: 25.0,
+            max_satamina: 360.0,
+            time_heal: Timer::from_seconds(0.375, TimerMode::Once),
+            time_satamina: Timer::from_seconds(0.025, TimerMode::Once),
         }
     }
 
@@ -254,14 +273,14 @@ impl PlayerData {
         } else {
             // normalizujemy od 0 do min_satamina
             let normalized = (self.min_satamina - self.satamina) / self.min_satamina;
-            -normalized.clamp(0.0, 0.75)+1.0 // upewniamy się, że nie wychodzi poza [0,1]
+            -normalized.clamp(0.0, 0.75) + 1.0 // upewniamy się, że nie wychodzi poza [0,1]
         }
     }
 }
 
 #[derive(Message)]
 pub struct ConsumeEvent {
-    pub slot: u32,     // z którego slotu pochodzi
+    pub slot: u32, // z którego slotu pochodzi
     pub item_id: String,
 }
 
@@ -271,6 +290,25 @@ pub struct FunctionalEvent {
     pub slot: u32,
     pub item_id: String,
 }
+
+/// UI intent: the user picked a save slot to play. The game lifecycle owns
+/// deciding what "starting" means (fresh player, or load from that slot).
+#[derive(Message)]
+pub struct PlayRequested(pub u8);
+
+/// Player-domain report: the player has died. The game lifecycle owns
+/// deciding what happens next (cleanup, despawn, death screen).
+#[derive(Message)]
+pub struct PlayerDied(pub Entity);
+
+/// UI intent: the user asked to leave the current run (from Pause or the
+/// death screen) and return to the main menu.
+#[derive(Message)]
+pub struct LeaveRequested;
+
+/// UI intent: the user asked to respawn after dying, staying in this run.
+#[derive(Message)]
+pub struct RespawnRequested;
 
 #[derive(Component)]
 pub struct YSort {
@@ -289,7 +327,7 @@ pub struct InventorySlot(pub usize);
 #[derive(Component)]
 pub struct InventoryImage(pub String);
 
-pub const WORLD_SIZE: i32 = 96;   // liczba kafelków widocznych w danym "obszarze"
+pub const WORLD_SIZE: i32 = 96; // liczba kafelków widocznych w danym "obszarze"
 pub const TILE_SIZE: f32 = 64.0;
 
 #[derive(Component)]
@@ -306,10 +344,23 @@ pub struct MonsterAI {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum MenuButtonAction {
-    NewGame,
-    LoadGame,
+    /// Main menu -> open the slot-select screen.
+    Play,
     Options,
     Exit,
+    /// Slot-select: start a fresh save here, or continue an existing one.
+    PlaySlot(u8),
+    ResetSlot(u8),
+    DeleteSlot(u8),
+    /// Slot-select -> back to the main menu.
+    BackToMenu,
+    /// Pause menu.
+    Resume,
+    Save,
+    /// Pause menu or death screen: leave the current run, return to the main menu.
+    Leave,
+    /// Death screen: revive and keep playing this run.
+    Respawn,
 }
 
 #[derive(Component, Clone, Copy)]
@@ -322,7 +373,7 @@ pub struct MenuRoot;
 pub struct MenuCamera;
 
 pub const CAMERA_LAYER_SPRITE: usize = 1; // warstwa dla sprite'ów (podłoga, widoczne ściany)
-pub const CAMERA_LAYER_LIGHT: usize  = 2; // warstwa dla światła i occluderów
+pub const CAMERA_LAYER_LIGHT: usize = 2; // warstwa dla światła i occluderów
 
 pub const CAMERA_LAYER_FLOOR: &[usize] = &[0];
 pub const CAMERA_LAYER_ENTITY: &[usize] = &[0];

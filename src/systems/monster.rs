@@ -2,42 +2,126 @@ use bevy::prelude::*;
 use rapier2d::prelude::*;
 
 use crate::resourses::physics_resources::*;
-use bevy::camera::{RenderTarget, ImageRenderTarget};
+use crate::systems::physics::remove_rigid_body;
+use bevy::camera::{ImageRenderTarget, RenderTarget};
 
 pub struct MonsterPlugin;
 
 #[derive(Resource)]
 struct MonsterSpawnTimer(Timer);
 
+/// Mirrors `terrain::TerrainResetPending`: set true while a Leave-triggered
+/// despawn of all monsters is in progress, cleared once none remain
+/// (including any still `Pending` and mid-flight through `loader::inspect`).
+#[derive(Resource, Default)]
+struct MonsterResetPending(bool);
+
 //use bevy_2d_screen_space_lightmaps::lightmap_plugin::lightmap_plugin::*;
 use bevy::camera::visibility::RenderLayers;
+use bevy::render::render_resource::{
+    Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
+};
 use bevy_firefly::prelude::*;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages, TextureDescriptor};
 
 #[derive(Resource)]
 struct MonsterConfig {
     min_spawn_distance: f32,   // w tileach
     max_despawn_distance: f32, // w tileach
     max_monsters: usize,
-    world_size_x: usize,       // w tileach
-    world_size_y: usize,       // w tileach
-    tile_size: f32,            // piksele
+    world_size_x: usize, // w tileach
+    world_size_y: usize, // w tileach
+    tile_size: f32,      // piksele
 }
 
 impl Plugin for MonsterPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(MonsterSpawnTimer(Timer::from_seconds(1.0, TimerMode::Repeating)))
-           .insert_resource(MonsterConfig {
-               min_spawn_distance: 20.0,   // spawn 20 kratek
-               max_despawn_distance: 30.0, // despawn 30 kratek
-               max_monsters: 1,
-               world_size_x: (WORLD_SIZE/3) as usize,
-               world_size_y: (WORLD_SIZE/3) as usize,
-               tile_size: 64.0,
-           })
-           .add_systems(Update, spawn_monsters_system.run_if(|status: Res<GameStatus>, status2: Res<ResumeStatus>| status.0 && !status2.0))
-           .add_systems(Update, (monster_ai, animate_monster_sprite).run_if(|status: Res<GameStatus>, status2: Res<ResumeStatus>| status.0 && !status2.0));
+        app.insert_resource(MonsterSpawnTimer(Timer::from_seconds(
+            1.0,
+            TimerMode::Repeating,
+        )))
+        .insert_resource(MonsterConfig {
+            min_spawn_distance: 20.0,   // spawn 20 kratek
+            max_despawn_distance: 30.0, // despawn 30 kratek
+            max_monsters: 1,
+            world_size_x: (WORLD_SIZE / 3) as usize,
+            world_size_y: (WORLD_SIZE / 3) as usize,
+            tile_size: 64.0,
+        })
+        .add_systems(
+            Update,
+            spawn_monsters_system
+                .run_if(|status: Res<GameStatus>, status2: Res<ResumeStatus>| {
+                    status.0 && !status2.0
+                })
+                .in_set(crate::systems::lifecycle::AppSet::Gameplay),
+        )
+        .add_systems(
+            Update,
+            (monster_ai, animate_monster_sprite)
+                .run_if(|status: Res<GameStatus>, status2: Res<ResumeStatus>| {
+                    status.0 && !status2.0
+                })
+                .in_set(crate::systems::lifecycle::AppSet::Gameplay),
+        )
+        .insert_resource(MonsterResetPending::default())
+        .add_systems(
+            Update,
+            handle_world_reset.in_set(crate::systems::lifecycle::AppSet::Lifecycle),
+        );
     }
+}
+
+/// Despawns every monster in reaction to Leave, including proper Rapier
+/// physics teardown. Runs ungated (not behind the GameStatus run_if) since
+/// it must keep working across frames while the session is already ending.
+fn handle_world_reset(
+    mut events: MessageReader<LeaveRequested>,
+    mut commands: Commands,
+    mut reset_pending: ResMut<MonsterResetPending>,
+    mut rigid_bodies: ResMut<ResRigidBodySet>,
+    mut colliders: ResMut<ResColliderSet>,
+    mut island_manager: ResMut<ResIslandManager>,
+    phys_query: Query<(Entity, &RigidBodyHandleComponent), (With<Monster>, Without<Pending>)>,
+    non_phys_query: Query<
+        Entity,
+        (
+            With<Monster>,
+            Without<RigidBodyHandleComponent>,
+            Without<Pending>,
+        ),
+    >,
+    any_monster_query: Query<Entity, With<Monster>>,
+) {
+    let mut requested = false;
+    for _ in events.read() {
+        requested = true;
+    }
+    if requested {
+        reset_pending.0 = true;
+    }
+    if !reset_pending.0 {
+        return;
+    }
+
+    for (entity, handle) in &phys_query {
+        remove_rigid_body(
+            &mut rigid_bodies,
+            &mut colliders,
+            &mut island_manager,
+            handle.0,
+        );
+        commands.entity(entity).despawn();
+    }
+    for entity in &non_phys_query {
+        commands.entity(entity).despawn();
+    }
+
+    // Anything still `Pending` is mid-flight through `loader::inspect`;
+    // leave it for a later frame (same race avoidance as terrain's reset).
+    if any_monster_query.iter().next().is_some() {
+        return;
+    }
+    reset_pending.0 = false;
 }
 
 fn spawn_monsters_system(
@@ -94,11 +178,14 @@ fn spawn_monsters_system(
                 player_transform.translation.y + distance * angle.sin(),
             );
             // sprawdź czy w granicach mapy
-            if pos.x >= map_min_x && pos.x <= map_max_x && pos.y >= map_min_y && pos.y <= map_max_y {
+            if pos.x >= map_min_x && pos.x <= map_max_x && pos.y >= map_min_y && pos.y <= map_max_y
+            {
                 break;
             }
             attempts += 1;
-            if attempts > 5 { break; } // unikamy nieskończonej pętli
+            if attempts > 5 {
+                break;
+            } // unikamy nieskończonej pętli
         }
         let monster_animation_indices = atlas_handles.0.get("walk").unwrap().clone();
         //let image_handle = create_ai_texture(&mut images, 1024, 1024);
@@ -118,43 +205,46 @@ fn spawn_monsters_system(
             Pending,
             Mesh2d(meshes.add(Rectangle::new(40.0, 42.5))),
             Transform::from_xyz(pos.x, pos.y, -32.0),
-            children![/*(
-                Camera2d,
-                Camera {
-                    order: -100,
-                    clear_color: ClearColorConfig::None,
-                    ..default()
-                },
-                RenderTarget::Image(ImageRenderTarget::from(image_handle.clone())),
-                RenderLayers::from_layers(CAMERA_LAYER_MONSTER),
-                AICamera,
-            ),*/
-            (
-                Sprite::from_atlas_image(
-                    texture.clone(),
-                    bevy::prelude::TextureAtlas {
-                        layout: texture_atlas_layout.clone(),
-                        index: monster_animation_indices.first,
+            children![
+                /*(
+                    Camera2d,
+                    Camera {
+                        order: -100,
+                        clear_color: ClearColorConfig::None,
+                        ..default()
                     },
+                    RenderTarget::Image(ImageRenderTarget::from(image_handle.clone())),
+                    RenderLayers::from_layers(CAMERA_LAYER_MONSTER),
+                    AICamera,
+                ),*/
+                (
+                    Sprite::from_atlas_image(
+                        texture.clone(),
+                        bevy::prelude::TextureAtlas {
+                            layout: texture_atlas_layout.clone(),
+                            index: monster_animation_indices.first,
+                        },
+                    ),
+                    YSort { z: 0.375 },
+                    Transform::from_xyz(0.0, 37.5, 64.0).with_scale(Vec3::splat(2.0)),
+                    RenderLayers::from_layers(CAMERA_LAYER_MONSTER),
+                    monster_animation_indices,
+                    AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
+                    MonsterSprite,
+                    AttackStatus(false),
+                    FinishStatus(false),
                 ),
-                YSort { z: 0.375 },
-                Transform::from_xyz(0.0, 37.5, 64.0).with_scale(Vec3::splat(2.0)),
-                RenderLayers::from_layers(CAMERA_LAYER_MONSTER),
-                monster_animation_indices,
-                AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
-                MonsterSprite,
-                AttackStatus(false),
-                FinishStatus(false),
-            ),(
-                Transform::from_xyz(0.0, 15.0, 0.0),
-                PointLight2d {
-                    range: 375.0,
-                    intensity: 0.075,
-                    color: Color::srgba(1.0, 0.5, 0.0, 1.0),
-                    ..default()
-                },
-                YSort { z: 0.0 },
-            )],
+                (
+                    Transform::from_xyz(0.0, 15.0, 0.0),
+                    PointLight2d {
+                        range: 375.0,
+                        intensity: 0.075,
+                        color: Color::srgba(1.0, 0.5, 0.0, 1.0),
+                        ..default()
+                    },
+                    YSort { z: 0.0 },
+                )
+            ],
         ));
         /*if spawned == false {
             for root in menu_root_query.iter() {
@@ -181,11 +271,7 @@ fn spawn_monsters_system(
     }
 }
 
-fn create_ai_texture(
-    images: &mut Assets<Image>,
-    width: u32,
-    height: u32,
-) -> Handle<Image> {
+fn create_ai_texture(images: &mut Assets<Image>, width: u32, height: u32) -> Handle<Image> {
     let size = Extent3d {
         width,
         height,
@@ -264,8 +350,25 @@ fn create_ai_texture(
 fn monster_ai(
     time: Res<Time>,
     mut player_query: Query<(&Transform, &mut PlayerData), (With<Player>, Without<Pending>)>,
-    mut query: Query<(&mut MonsterAI, &mut RigidBodyHandleComponent, &mut Transform, Entity, &Children), (With<Monster>, Without<Player>, Without<Pending>)>,
-    mut child_query: Query<(&mut AnimationIndices, &mut AttackStatus, &mut FinishStatus, &mut Sprite), With<MonsterSprite>>,
+    mut query: Query<
+        (
+            &mut MonsterAI,
+            &mut RigidBodyHandleComponent,
+            &mut Transform,
+            Entity,
+            &Children,
+        ),
+        (With<Monster>, Without<Player>, Without<Pending>),
+    >,
+    mut child_query: Query<
+        (
+            &mut AnimationIndices,
+            &mut AttackStatus,
+            &mut FinishStatus,
+            &mut Sprite,
+        ),
+        With<MonsterSprite>,
+    >,
     mut rigid_bodies: ResMut<ResRigidBodySet>,
     mut colliders: ResMut<ResColliderSet>,
     mut island_manager: ResMut<ResIslandManager>,
@@ -273,15 +376,35 @@ fn monster_ai(
     mut query_ui: Query<(&mut Text, &mut PointText), With<PointText>>,
     config: Res<MonsterConfig>,
     atlas_handles: Res<AtlasHandles>,
-    bodies_query: Query<(&Transform), (Or<(With<Wall>, With<Floor>)>, Without<Pending>, With<RigidBodyHandleComponent>, Without<Player>, Without<Monster>)>,
-    mut camera_query: Query<&mut Transform, (With<AICamera>, With<Camera2d>, Without<PlayerCamera>,Without<Player>, Without<RigidBodyHandleComponent>, Without<Wall>, Without<Floor>)>,
+    bodies_query: Query<
+        (&Transform),
+        (
+            Or<(With<Wall>, With<Floor>)>,
+            Without<Pending>,
+            With<RigidBodyHandleComponent>,
+            Without<Player>,
+            Without<Monster>,
+        ),
+    >,
+    mut camera_query: Query<
+        &mut Transform,
+        (
+            With<AICamera>,
+            With<Camera2d>,
+            Without<PlayerCamera>,
+            Without<Player>,
+            Without<RigidBodyHandleComponent>,
+            Without<Wall>,
+            Without<Floor>,
+        ),
+    >,
 ) {
     let (player_transform, mut player_data_some): (Transform, Option<Mut<PlayerData>>) =
-    if let Ok((t, mut d)) = player_query.single_mut() {
-        (t.clone(), Some(d)) // <- klonujemy Transform, żeby mieć wartość
-    } else {
-        (Transform::default(), None)
-    };
+        if let Ok((t, mut d)) = player_query.single_mut() {
+            (t.clone(), Some(d)) // <- klonujemy Transform, żeby mieć wartość
+        } else {
+            (Transform::default(), None)
+        };
 
     let Ok((mut t_ui, mut t_pt)) = query_ui.single_mut() else {
         return;
@@ -313,7 +436,12 @@ fn monster_ai(
                 }
 
                 for collider_handle in colliders_clone {
-                    colliders.0.remove(collider_handle, &mut island_manager.0, &mut rigid_bodies.0, true);
+                    colliders.0.remove(
+                        collider_handle,
+                        &mut island_manager.0,
+                        &mut rigid_bodies.0,
+                        true,
+                    );
                 }
                 rigid_bodies.0.remove(
                     rb_handle.0,
@@ -328,12 +456,16 @@ fn monster_ai(
             }
             let mut next = true;
             for transform in bodies_query {
-                let min_x = transform.translation.x - config.tile_size/2.0;
-                let max_x = transform.translation.x + config.tile_size/2.0;
-                let min_y = transform.translation.y - config.tile_size/2.0;
-                let max_y = transform.translation.y + config.tile_size/2.0;
+                let min_x = transform.translation.x - config.tile_size / 2.0;
+                let max_x = transform.translation.x + config.tile_size / 2.0;
+                let min_y = transform.translation.y - config.tile_size / 2.0;
+                let max_y = transform.translation.y + config.tile_size / 2.0;
 
-                if monster_pos.x >= min_x && monster_pos.x <= max_x && monster_pos.y >= min_y && monster_pos.y <= max_y {
+                if monster_pos.x >= min_x
+                    && monster_pos.x <= max_x
+                    && monster_pos.y >= min_y
+                    && monster_pos.y <= max_y
+                {
                     next = false;
                     break;
                 }
@@ -351,7 +483,12 @@ fn monster_ai(
                 }
 
                 for collider_handle in colliders_clone {
-                    colliders.0.remove(collider_handle, &mut island_manager.0, &mut rigid_bodies.0, true);
+                    colliders.0.remove(
+                        collider_handle,
+                        &mut island_manager.0,
+                        &mut rigid_bodies.0,
+                        true,
+                    );
                 }
                 rigid_bodies.0.remove(
                     rb_handle.0,
@@ -373,12 +510,18 @@ fn monster_ai(
                         ai.random_timer.reset();
                         ai.action_timer.reset();
                     } else if distance < action_distance {
-                        if let Ok((mut child_indices, mut attack, mut finish, mut sprite)) = child_query.get_mut(children[0]) {
-                            if attack.0 == false && finish.0 == false && ai.action_cooldown.just_finished() {
+                        if let Ok((mut child_indices, mut attack, mut finish, mut sprite)) =
+                            child_query.get_mut(children[0])
+                        {
+                            if attack.0 == false
+                                && finish.0 == false
+                                && ai.action_cooldown.just_finished()
+                            {
                                 attack.0 = true;
                                 ai.action_cooldown.reset();
                                 ai.action_timer.reset();
-                                let animation_indices = atlas_handles.0.get("attack").unwrap().clone();
+                                let animation_indices =
+                                    atlas_handles.0.get("attack").unwrap().clone();
                                 if let Some(atlas) = &mut sprite.texture_atlas {
                                     atlas.index = animation_indices.first;
                                 }
@@ -399,7 +542,9 @@ fn monster_ai(
                             ai.action_timer.reset();
                         }*/
                     } else {
-                        if let Ok((mut child_indices, mut attack, mut finish, mut sprite)) = child_query.get_mut(children[0]) {
+                        if let Ok((mut child_indices, mut attack, mut finish, mut sprite)) =
+                            child_query.get_mut(children[0])
+                        {
                             finish.0 = false;
                         }
                         ai.action_timer.reset();
@@ -432,8 +577,8 @@ fn monster_ai(
             let mut velocity = dir * speed;
             if ai.health < ai.last_health {
                 // obrażenia, cofamy się
-                velocity = -dir * speed * 3.14/2.0;
-                ai.last_health = (ai.health*2.0+ai.last_health)/3.0;
+                velocity = -dir * speed * 3.14 / 2.0;
+                ai.last_health = (ai.health * 2.0 + ai.last_health) / 3.0;
                 rigid_body.set_linvel(vector![velocity.x, velocity.y], true);
             } else {
                 ai.last_health = ai.health;
@@ -470,7 +615,16 @@ fn rand_dir() -> f32 {
 fn animate_monster_sprite(
     time: Res<Time>,
     atlas_handles: Res<AtlasHandles>,
-    mut query: Query<(&mut AnimationIndices, &mut AnimationTimer, &mut Sprite, &mut AttackStatus, &mut FinishStatus), With<MonsterSprite>>,
+    mut query: Query<
+        (
+            &mut AnimationIndices,
+            &mut AnimationTimer,
+            &mut Sprite,
+            &mut AttackStatus,
+            &mut FinishStatus,
+        ),
+        With<MonsterSprite>,
+    >,
 ) {
     for (mut indices, mut timer, mut sprite, mut attack, mut finish) in &mut query {
         timer.0.tick(time.delta());

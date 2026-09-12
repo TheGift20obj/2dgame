@@ -1,17 +1,23 @@
-use bevy::prelude::*;
 use crate::resourses::physics_resources::*;
+use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, Window};
 
 pub struct EventerPlugin;
 
 impl Plugin for EventerPlugin {
     fn build(&self, app: &mut App) {
-        app
-            .add_message::<ConsumeEvent>()
+        app.add_message::<ConsumeEvent>()
             .add_message::<FunctionalEvent>()
             //.init_resource::<Messages<ConsumeEvent>>()
             //.init_resource::<Messages<FunctionalEvent>>()
-            .add_systems(Update, (food_eventer, functional_eventer).run_if(|status: Res<GameStatus>, status2: Res<ResumeStatus>| status.0 && !status2.0));
+            .add_systems(
+                Update,
+                (food_eventer, functional_eventer)
+                    .run_if(|status: Res<GameStatus>, status2: Res<ResumeStatus>| {
+                        status.0 && !status2.0
+                    })
+                    .in_set(crate::systems::lifecycle::AppSet::Gameplay),
+            );
     }
 }
 
@@ -54,10 +60,22 @@ fn food_eventer(
 fn functional_eventer(
     mut events: MessageReader<FunctionalEvent>,
     config: Res<ItemConfig>,
-    mut query: Query<(&mut AnimationIndices, &mut AnimationTimer, &mut Sprite, &mut GlobalTransform, &mut AttackStatus), With<PlayerSprite>>,
+    mut query: Query<
+        (
+            &mut AnimationIndices,
+            &mut AnimationTimer,
+            &mut Sprite,
+            &mut GlobalTransform,
+            &mut AttackStatus,
+        ),
+        With<PlayerSprite>,
+    >,
     asset_server: Res<AssetServer>,
     atlas_handles: Res<AtlasHandles>,
-    mut query_m: Query<(&mut MonsterAI, &Transform), (With<Monster>, Without<Player>, Without<Pending>)>,
+    mut query_m: Query<
+        (&mut MonsterAI, &Transform),
+        (With<Monster>, Without<Player>, Without<Pending>),
+    >,
     mut query_p: Query<&mut PlayerData, With<Player>>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window, With<PrimaryWindow>>,
@@ -91,9 +109,12 @@ fn functional_eventer(
 
                             if let Some(cursor_pos) = window.cursor_position() {
                                 let to_monster = (monster_pos - player_pos).normalize_or_zero();
-                                let screen_center = Vec2::new(window.width() / 2.0, window.height() / 2.0);
-                                let fixed_cursor_pos = Vec2::new(cursor_pos.x, window.height() - cursor_pos.y);
-                                let cursor_dir = (fixed_cursor_pos - screen_center).normalize_or_zero();
+                                let screen_center =
+                                    Vec2::new(window.width() / 2.0, window.height() / 2.0);
+                                let fixed_cursor_pos =
+                                    Vec2::new(cursor_pos.x, window.height() - cursor_pos.y);
+                                let cursor_dir =
+                                    (fixed_cursor_pos - screen_center).normalize_or_zero();
                                 let dot = cursor_dir.dot(to_monster).clamp(-1.0, 1.0);
                                 let angle = dot.acos().to_degrees();
                                 if angle < 75.0 {

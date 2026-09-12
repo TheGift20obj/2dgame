@@ -1,6 +1,6 @@
+use crate::resourses::physics_resources::*;
 use bevy::prelude::*;
 use rapier2d::prelude::*;
-use crate::resourses::physics_resources::*;
 
 pub struct PhysicsPlugin;
 
@@ -20,14 +20,22 @@ impl Plugin for PhysicsPlugin {
         app.insert_resource(ResCCDSolver(CCDSolver::new()));
         app.insert_resource(ResQueryPipeline(QueryPipeline::new()));
         app.add_systems(Startup, init_physics);
-        app.add_systems(FixedUpdate, step_physics);
-        app.add_systems(FixedPostUpdate, sync_physics_to_transform);
+        app.add_systems(
+            FixedUpdate,
+            step_physics.run_if(|status: Res<GameStatus>, status2: Res<ResumeStatus>| {
+                status.0 && !status2.0
+            }),
+        );
+        app.add_systems(
+            FixedPostUpdate,
+            sync_physics_to_transform.run_if(
+                |status: Res<GameStatus>, status2: Res<ResumeStatus>| status.0 && !status2.0,
+            ),
+        );
     }
 }
 
-fn init_physics(
-    mut physics_work: ResMut<ResPhysicsWork>,
-) {
+fn init_physics(mut physics_work: ResMut<ResPhysicsWork>) {
     physics_work.0 = true;
 }
 
@@ -62,6 +70,38 @@ fn step_physics(
     );
 }
 
+/// Removes a rigid body and all of its colliders from the physics world.
+/// Shared by lifecycle code that despawns a physics-backed entity.
+pub fn remove_rigid_body(
+    rigid_bodies: &mut ResRigidBodySet,
+    colliders: &mut ResColliderSet,
+    island_manager: &mut ResIslandManager,
+    handle: RigidBodyHandle,
+) {
+    let mut collider_handles = Vec::new();
+    if let Some(rb) = rigid_bodies.0.get(handle) {
+        for collider_handle in rb.colliders() {
+            collider_handles.push(*collider_handle);
+        }
+    }
+    for collider_handle in collider_handles {
+        colliders.0.remove(
+            collider_handle,
+            &mut island_manager.0,
+            &mut rigid_bodies.0,
+            true,
+        );
+    }
+    rigid_bodies.0.remove(
+        handle,
+        &mut island_manager.0,
+        &mut colliders.0,
+        &mut ImpulseJointSet::new(),
+        &mut MultibodyJointSet::new(),
+        true,
+    );
+}
+
 fn sync_physics_to_transform(
     rigid_bodies: Res<ResRigidBodySet>,
     mut query_single: Query<(&RigidBodyHandleComponent, &mut Transform)>,
@@ -70,7 +110,7 @@ fn sync_physics_to_transform(
         if let Some(rb) = rigid_bodies.0.get(rb_handle.0) {
             let pos = rb.position();
             let translation = pos.translation;
-            let rotation = pos.rotation.angle();;
+            let rotation = pos.rotation.angle();
 
             transform.translation.x = translation.x;
             transform.translation.y = translation.y;

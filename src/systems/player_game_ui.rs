@@ -1,15 +1,26 @@
-use bevy::prelude::*;
-use bevy::color::palettes::css::*;
 use crate::resourses::physics_resources::*;
+use bevy::color::palettes::css::*;
+use bevy::prelude::*;
 pub struct HudPlugin;
 
 const SCALE: f32 = 1.5;
 
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
-        app
-            .insert_resource(InventoryState::default())
-            .add_systems(Update, (update_health_bar, update_satamina_bar, handle_inventory_input, update_inventory_ui, ui_use_item).run_if(|status: Res<GameStatus>, status2: Res<ResumeStatus>| status.0 && !status2.0));
+        app.insert_resource(InventoryState::default()).add_systems(
+            Update,
+            (
+                update_health_bar,
+                update_satamina_bar,
+                handle_inventory_input,
+                update_inventory_ui,
+                ui_use_item,
+            )
+                .run_if(|status: Res<GameStatus>, status2: Res<ResumeStatus>| {
+                    status.0 && !status2.0
+                })
+                .in_set(crate::systems::lifecycle::AppSet::Gameplay),
+        );
     }
 }
 
@@ -22,7 +33,11 @@ impl Default for InventoryState {
     }
 }
 
-pub fn spawn_health_bar(commands: &mut Commands, asset_server: &Res<AssetServer>) {
+pub fn spawn_health_bar(
+    commands: &mut Commands,
+    asset_server: &Res<AssetServer>,
+    initial_points: u32,
+) {
     // Kontener paska zdrowia
     commands
         .spawn((
@@ -97,14 +112,14 @@ pub fn spawn_health_bar(commands: &mut Commands, asset_server: &Res<AssetServer>
                     height: Val::Percent(100.0),
                     ..default()
                 },
-                Text::new(format!("Points: {}", 0)),
+                Text::new(format!("Points: {}", initial_points)),
                 TextFont {
                     font: asset_server.load("fonts/Cantarell-Bold.ttf"),
                     font_size: 14.0,
                     ..default()
                 },
                 TextColor(Color::WHITE),
-                PointText(0),
+                PointText(initial_points),
             ));
         });
 }
@@ -150,7 +165,7 @@ pub fn spawn_inventory_bar(commands: &mut Commands, asset_server: &Res<AssetServ
                             },
                             BackgroundColor(Color::NONE),
                             ImageNode::new(asset_server.load("textures/evil_dirt.png")),
-                            Text::new(format!("{}", (i+1)%10)),
+                            Text::new(format!("{}", (i + 1) % 10)),
                             TextFont {
                                 font: asset_server.load("fonts/Cantarell-Bold.ttf"),
                                 font_size: 14.0,
@@ -166,7 +181,7 @@ pub fn spawn_inventory_bar(commands: &mut Commands, asset_server: &Res<AssetServ
                                     align_items: AlignItems::End,
                                     ..default()
                                 },
-                                BackgroundColor(Color::srgba(1.0, 1.0, 0.0, 0.75)),          // brak wypełnienia
+                                BackgroundColor(Color::srgba(1.0, 1.0, 0.0, 0.75)), // brak wypełnienia
                                 InventorySlot(i),
                                 InventoryImage("None".to_string()),
                                 ImageNode::new(asset_server.load("textures/empty.png")),
@@ -218,10 +233,7 @@ fn update_satamina_bar(
     }
 }
 
-fn handle_inventory_input(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut state: ResMut<InventoryState>,
-) {
+fn handle_inventory_input(keyboard: Res<ButtonInput<KeyCode>>, mut state: ResMut<InventoryState>) {
     /*// Otwieranie/zamykanie ekwipunku klawiszem I
     if keyboard.just_pressed(KeyCode::KeyI) {
         state.open = !state.open;
@@ -252,10 +264,16 @@ fn handle_inventory_input(
 
 fn update_inventory_ui(
     state: Res<InventoryState>,
-    mut slots: Query<(&mut BackgroundColor, &mut ImageNode, &InventorySlot, &mut InventoryImage, &Children)>,
+    mut slots: Query<(
+        &mut BackgroundColor,
+        &mut ImageNode,
+        &InventorySlot,
+        &mut InventoryImage,
+        &Children,
+    )>,
     mut text_q: Query<&mut Text>,
     query: Query<&PlayerData, With<Player>>,
-    asset_server: Res<AssetServer>
+    asset_server: Res<AssetServer>,
 ) {
     // Pokaż/ukryj panel ekwipunku
     let Ok(player_data) = query.single() else {

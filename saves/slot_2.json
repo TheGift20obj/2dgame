@@ -1,0 +1,34 @@
+{
+  "health": 100.0,
+  "max_health": 100.0,
+  "satamina": 250.375,
+  "min_satamina": 25.0,
+  "max_satamina": 360.0,
+  "position": [
+    -2899.8022,
+    -1150.7195
+  ],
+  "inventory": {
+    "0": {
+      "id": "sword_basic",
+      "path": "textures/items/sword_icon.png",
+      "value": [
+        10.0,
+        45.0
+      ],
+      "item_type": "weapon",
+      "amount": 0
+    },
+    "1": {
+      "id": "apple_red",
+      "path": "textures/items/apple_icon.png",
+      "value": [
+        10.0,
+        25.0
+      ],
+      "item_type": "food",
+      "amount": 14
+    }
+  },
+  "points": 0
+}
