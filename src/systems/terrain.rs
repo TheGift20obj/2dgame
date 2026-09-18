@@ -20,6 +20,111 @@ pub struct GapOccluder;
 const TR_LOCAL: Vec2 = Vec2::new(-TILE_SIZE / 9.0, TILE_SIZE / 1.75);
 const HALF_TILE: Vec2 = Vec2::new(TILE_SIZE / 1.125, TILE_SIZE / 1.125);
 
+/// Noise seed/threshold constants shared between actual generation
+/// (`generate_area`) and `predict_tile`'s noise-only prediction of what a
+/// not-yet-generated tile would contain — kept in one place so the two can
+/// never drift apart. Only wall/water classification is shared this way;
+/// `generate_area`'s cosmetic texture choice (sand/dirt/grass/path/stone
+/// skinning, biome) isn't needed by prediction, which only cares whether a
+/// tile blocks a monster from spawning there.
+const TERRAIN_NOISE_SEED: u32 = 921925;
+const TERRAIN_NOISE_SCALE: f64 = 15.0;
+/// terrain_val below this => water, in every biome.
+const WATER_THRESHOLD: f64 = -0.45;
+/// terrain_val at/above this => stone (the only ground wall tiles ever spawn on).
+const STONE_THRESHOLD: f64 = 0.3;
+const WALL_NOISE_SCALE: f64 = 6.0;
+const WALL_NOISE_Z: f64 = 999.0;
+
+/// What `predict_tile` (or `generate_area`, once generated) determined about
+/// one tile — only the two facts monster spawn validation cares about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PredictedTile {
+    pub is_water: bool,
+    pub is_wall: bool,
+}
+
+/// Shared `Fbm<Perlin>` instance for `TERRAIN_NOISE_SEED`, built once and
+/// reused. `predict_tile` can be called many thousands of times a second
+/// (every A* neighbor check and every line-of-sight tile step that lands on
+/// unloaded ground, for every monster) — constructing a fresh `Fbm` per call
+/// was a measurable lag-spike source, since each one repeats octave/
+/// frequency setup work that only ever depends on the seed.
+fn terrain_noise() -> &'static Fbm<Perlin> {
+    static NOISE: std::sync::OnceLock<Fbm<Perlin>> = std::sync::OnceLock::new();
+    NOISE.get_or_init(|| Fbm::<Perlin>::new(TERRAIN_NOISE_SEED))
+}
+
+/// Predicts whether a not-yet-generated tile would be water or a wall, using
+/// the exact same noise function/seed/thresholds `generate_area` uses to
+/// decide it for real. Deterministic and independent of generation order, so
+/// it's safe to call for tiles far outside the currently loaded area (e.g.
+/// to validate a monster spawn point before its terrain chunk ever loads)
+/// without generating anything.
+pub fn predict_tile(tile: IVec2) -> PredictedTile {
+    let terrain_noise = terrain_noise();
+    let x = tile.x as f64;
+    let y = tile.y as f64;
+    let tile_size = TILE_SIZE as f64;
+
+    let terrain_val = terrain_noise.get([
+        x / tile_size / TERRAIN_NOISE_SCALE,
+        y / tile_size / TERRAIN_NOISE_SCALE,
+    ]);
+    let is_water = terrain_val < WATER_THRESHOLD;
+    let is_wall = !is_water
+        && terrain_val >= STONE_THRESHOLD
+        && terrain_noise.get([
+            x / tile_size / WALL_NOISE_SCALE,
+            y / tile_size / WALL_NOISE_SCALE,
+            WALL_NOISE_Z,
+        ]) > 0.0;
+
+    PredictedTile { is_water, is_wall }
+}
+
+/// The (up to 4) distinct tile keys a `center`-anchored box of half-extent
+/// `half_extent` overlaps — tiles are `TILE_SIZE` squares centered on
+/// multiples of `TILE_SIZE`, same convention as `TerrainMap`'s keys.
+fn tiles_touched(center: Vec2, half_extent: Vec2) -> [IVec2; 4] {
+    let tile_key = |v: f32| -> i32 { ((v / TILE_SIZE) + 0.5).floor() as i32 * TILE_SIZE as i32 };
+    let xs = [
+        tile_key(center.x - half_extent.x),
+        tile_key(center.x + half_extent.x),
+    ];
+    let ys = [
+        tile_key(center.y - half_extent.y),
+        tile_key(center.y + half_extent.y),
+    ];
+    [
+        IVec2::new(xs[0], ys[0]),
+        IVec2::new(xs[1], ys[0]),
+        IVec2::new(xs[0], ys[1]),
+        IVec2::new(xs[1], ys[1]),
+    ]
+}
+
+/// True if a box of half-extent `half_extent` centered at `center` (a
+/// candidate spawn point, plus the monster's own collider size and a safety
+/// margin) is entirely clear of walls and water. Uses the real terrain
+/// (`TerrainMap`) for any tile that's actually loaded, and falls back to
+/// `predict_tile`'s noise-only prediction for tiles that aren't — so this
+/// never has to force terrain generation just to check.
+pub fn is_area_clear(terrain_map: &TerrainMap, center: Vec2, half_extent: Vec2) -> bool {
+    for tile in tiles_touched(center, half_extent) {
+        let blocked = if terrain_map.is_generated(tile) {
+            terrain_map.is_wall(tile) || terrain_map.is_water(tile)
+        } else {
+            let predicted = predict_tile(tile);
+            predicted.is_wall || predicted.is_water
+        };
+        if blocked {
+            return false;
+        }
+    }
+    true
+}
+
 #[derive(Component, Clone)]
 pub struct OccluderMeta {
     /// lokalny transform taki jaki miał occluder na starcie (base)
@@ -36,17 +141,38 @@ pub struct OccluderMeta {
 struct TerrainResetPending(bool);
 
 #[derive(Resource, Default)]
-struct TerrainMap {
+pub struct TerrainMap {
     generated: HashSet<IVec2>,
     /// Non-wall terrain entities (base Floor/water, and the optional Fog
     /// overlay) at each generated position. Lets tile lookup/removal be a
     /// direct map access instead of scanning every terrain entity.
     floor_entities: HashMap<IVec2, Vec<Entity>>,
     wall_map: HashMap<IVec2, Entity>,
+    /// Tiles generated as water. Tracked separately from `floor_entities`
+    /// (which holds entities, not tile kind) so spawn validation can ask
+    /// "is this loaded tile water" as cheaply as it asks "is this a wall".
+    water_tiles: HashSet<IVec2>,
     pub gap_occluders: HashMap<(Entity, Entity), Entity>,
 }
 
 impl TerrainMap {
+    /// True if a wall occupies this tile (tile key = world-space tile center,
+    /// snapped to `TILE_SIZE`, same convention as `generated`/`wall_map`).
+    /// Used by monster pathfinding/line-of-sight as the walkability grid.
+    pub fn is_wall(&self, tile: IVec2) -> bool {
+        self.wall_map.contains_key(&tile)
+    }
+
+    /// True if this tile was generated as water.
+    pub fn is_water(&self, tile: IVec2) -> bool {
+        self.water_tiles.contains(&tile)
+    }
+
+    /// True if terrain has been generated for this tile. Pathfinding treats
+    /// ungenerated tiles as non-walkable (unknown ground), not as free space.
+    pub fn is_generated(&self, tile: IVec2) -> bool {
+        self.generated.contains(&tile)
+    }
     /// Tworzy canonical key (A,B) niezależnie od kolejności
     fn canonical_pair(a: Entity, b: Entity) -> (Entity, Entity) {
         if a.index() < b.index() {
@@ -318,6 +444,7 @@ fn handle_world_reset(
     terrain_map.generated.clear();
     terrain_map.floor_entities.clear();
     terrain_map.wall_map.clear();
+    terrain_map.water_tiles.clear();
     terrain_map.gap_occluders.clear();
     reset_pending.0 = false;
 }
@@ -482,6 +609,7 @@ fn update_terrain(
             }
         }
 
+        terrain_map.water_tiles.remove(&pos);
         terrain_map.generated.remove(&pos);
     }
 }
@@ -503,7 +631,7 @@ fn generate_area(
     >,
     sprite_query: &mut Query<&mut Sprite, With<WaterSprite>>,
 ) {
-    let terrain_noise = Fbm::<Perlin>::new(921925);
+    let terrain_noise = terrain_noise();
     let path_noise = Fbm::<Perlin>::new(5342756);
     let biome_noise = Fbm::<Perlin>::new(2683467); // nowy noise dla biomów
 
@@ -619,12 +747,14 @@ fn generate_area(
             let biome = "normal";
 
             // === noise terenu w obrębie biomu ===
-            let terrain_val =
-                terrain_noise.get([(x / tile_size) as f64 / 15.0, (y / tile_size) as f64 / 15.0]);
+            let terrain_val = terrain_noise.get([
+                (x / tile_size) as f64 / TERRAIN_NOISE_SCALE,
+                (y / tile_size) as f64 / TERRAIN_NOISE_SCALE,
+            ]);
 
             let mut texture_path = match biome {
                 "snow" => {
-                    if terrain_val < -0.45 {
+                    if terrain_val < WATER_THRESHOLD {
                         "textures/water"
                     } else if terrain_val < -0.25 {
                         "textures/ice.png"
@@ -633,11 +763,11 @@ fn generate_area(
                     }
                 }
                 "evil" => {
-                    if terrain_val < -0.45 {
+                    if terrain_val < WATER_THRESHOLD {
                         "textures/water"
                     } else if terrain_val < -0.25 {
                         "textures/evil_dirt.png"
-                    } else if terrain_val < 0.3 {
+                    } else if terrain_val < STONE_THRESHOLD {
                         "textures/evil_grass.png"
                     } else {
                         "textures/evil_stone.png"
@@ -645,13 +775,13 @@ fn generate_area(
                 }
                 _ => {
                     // normal
-                    if terrain_val < -0.45 {
+                    if terrain_val < WATER_THRESHOLD {
                         "textures/water"
                     } else if terrain_val < -0.25 {
                         "textures/sand.png"
                     } else if terrain_val < 0.0 {
                         "textures/dirt.png"
-                    } else if terrain_val < 0.3 {
+                    } else if terrain_val < STONE_THRESHOLD {
                         "textures/grass.png"
                     } else {
                         "textures/stone.png"
@@ -670,6 +800,9 @@ fn generate_area(
             }
 
             // === Spawn Floor ===
+            if texture_path == "textures/water" {
+                terrain_map.water_tiles.insert(pos);
+            }
             let floor_entity = if texture_path == "textures/water" {
                 // woda animowana
                 commands
@@ -727,9 +860,9 @@ fn generate_area(
             // === Ściany tylko na stone/evil_stone ===
             if texture_path == "textures/stone.png" || texture_path == "textures/evil_stone.png" {
                 let wall_val = terrain_noise.get([
-                    (x / tile_size) as f64 / 6.0,
-                    (y / tile_size) as f64 / 6.0,
-                    999.0,
+                    (x / tile_size) as f64 / WALL_NOISE_SCALE,
+                    (y / tile_size) as f64 / WALL_NOISE_SCALE,
+                    WALL_NOISE_Z,
                 ]);
                 if wall_val > 0.0 {
                     let wall_entity =

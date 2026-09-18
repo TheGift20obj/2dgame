@@ -12,6 +12,7 @@ impl Plugin for HudPlugin {
             (
                 update_health_bar,
                 update_satamina_bar,
+                update_points_text,
                 handle_inventory_input,
                 update_inventory_ui,
                 ui_use_item,
@@ -230,6 +231,21 @@ fn update_satamina_bar(
     if let Ok(mut bar) = query.single_mut() {
         let percent = (player_data.satamina / player_data.max_satamina).clamp(0.0, 1.0) * 100.0;
         bar.width = Val::Percent(percent);
+    }
+}
+
+/// Keeps the points display in sync with `Score` (the actual source of
+/// truth — see its doc comment) instead of the old approach of mutating the
+/// `Text` directly wherever a kill happened to be handled, which broke the
+/// moment the UI entity was ever recreated (pause/respawn/etc.) without that
+/// exact code path also re-threading the right number through.
+fn update_points_text(score: Res<Score>, mut query: Query<(&mut Text, &mut PointText)>) {
+    if !score.is_changed() {
+        return;
+    }
+    for (mut text, mut point_text) in &mut query {
+        point_text.0 = score.0;
+        *text = Text::new(format!("Points: {}", score.0));
     }
 }
 

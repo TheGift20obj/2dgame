@@ -1,4 +1,5 @@
 use crate::resourses::physics_resources::*;
+use crate::systems::monster_ai::difficulty::Difficulty;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -14,10 +15,22 @@ pub struct ActiveSlot(pub Option<u8>);
 
 /// What must survive across a player death, captured before the dead
 /// player entity is despawned so a later Respawn/Leave can still use it.
+/// Points aren't tracked here — `Score` is a plain resource independent of
+/// any entity's lifetime, so it survives death/respawn on its own.
 #[derive(Resource, Default)]
 pub struct PendingRespawn {
     pub inventory: Option<HashMap<u32, Item>>,
-    pub points: u32,
+}
+
+/// One monster's persisted state — just enough that leaving and coming back
+/// can't be used to reset a monster the player was fighting/fleeing to full
+/// health at a fresh position (position + HP only; short-term perception
+/// like current investigate target isn't worth persisting across a whole
+/// session gap).
+#[derive(Serialize, Deserialize, Clone, Copy)]
+pub struct MonsterSaveData {
+    pub position: (f32, f32),
+    pub health: f32,
 }
 
 /// Everything a save slot persists. Terrain is not included: it's fully
@@ -32,6 +45,24 @@ pub struct SaveData {
     pub position: (f32, f32),
     pub inventory: HashMap<u32, Item>,
     pub points: u32,
+    /// Monster AI difficulty this run was started with. Defaults to Normal
+    /// for saves written before this field existed.
+    #[serde(default)]
+    pub difficulty: Difficulty,
+    /// Every monster that existed when the player left, so leaving and
+    /// rejoining can't be used to cheaply reset the current threat (a
+    /// wounded pack back to full health at a fresh spawn distance, an
+    /// actively-chasing monster gone entirely). Empty for saves written
+    /// before this field existed, or if no monsters existed at the time.
+    #[serde(default)]
+    pub monsters: Vec<MonsterSaveData>,
+    /// The pack's learned player-escape-direction estimate (see
+    /// `monster_ai::hivemind::PlayerEscapeModel`) — Hard-only in practice,
+    /// harmless to persist regardless. Defaults to "nothing learned yet".
+    #[serde(default)]
+    pub pack_escape_dir: (f32, f32),
+    #[serde(default)]
+    pub pack_escape_samples: u32,
 }
 
 fn saves_dir() -> PathBuf {
@@ -77,8 +108,18 @@ pub fn player_data_from_save(save: &SaveData) -> PlayerData {
     }
 }
 
-/// Captures the current player's state into a `SaveData`, for writing to disk.
-pub fn capture_save_data(transform: &Transform, player_data: &PlayerData, points: u32) -> SaveData {
+/// Captures the current player's (and the current monsters') state into a
+/// `SaveData`, for writing to disk.
+#[allow(clippy::too_many_arguments)]
+pub fn capture_save_data(
+    transform: &Transform,
+    player_data: &PlayerData,
+    points: u32,
+    difficulty: Difficulty,
+    monsters: Vec<MonsterSaveData>,
+    pack_escape_dir: (f32, f32),
+    pack_escape_samples: u32,
+) -> SaveData {
     SaveData {
         health: player_data.health,
         max_health: player_data.max_health,
@@ -88,5 +129,9 @@ pub fn capture_save_data(transform: &Transform, player_data: &PlayerData, points
         position: (transform.translation.x, transform.translation.y),
         inventory: player_data.inventory.items.clone(),
         points,
+        difficulty,
+        monsters,
+        pack_escape_dir,
+        pack_escape_samples,
     }
 }

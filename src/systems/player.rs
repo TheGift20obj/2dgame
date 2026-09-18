@@ -1,4 +1,5 @@
 use crate::resourses::physics_resources::*;
+use crate::systems::monster_ai::perception::PlayerNoise;
 use bevy::prelude::*;
 
 use rapier2d::na::Point2;
@@ -15,6 +16,7 @@ use bevy_firefly::prelude::*;
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         //app.add_systems(Startup, init);
+        app.insert_resource(PlayerNoise::default());
         app.add_systems(
             Update,
             (update, animate_sprite, try_heal)
@@ -108,7 +110,7 @@ pub fn init(
                 (
                     Transform::from_xyz(0.0, 15.0, 0.0),
                     PointLight2d {
-                        range: 750.0,
+                        range: PLAYER_LIGHT_RANGE,
                         intensity: 0.125,
                         color: Color::WHITE,
                         ..default()
@@ -238,6 +240,7 @@ fn update(
             Without<SpriteCamera>,
         ),
     >,
+    mut player_noise: ResMut<PlayerNoise>,
 ) {
     let Ok((handle, mut transform, mut player_data)) = query.single_mut() else {
         return;
@@ -264,13 +267,21 @@ fn update(
     }
 
     let mut speed = 200.0;
+    let is_running = keyboard_input.pressed(KeyCode::ShiftLeft) && dir != Vec2::ZERO;
 
-    if keyboard_input.pressed(KeyCode::ShiftLeft) && dir != Vec2::ZERO {
+    if is_running {
         player_data.run(1.25, &time);
         speed = 350.0;
     } else {
         player_data.rest(0.375, &time);
     }
+
+    // Published for monster hearing (see monster_ai::perception::hear_player):
+    // standing still makes no noise; walking vs. running use different
+    // radii on the listening side.
+    player_noise.position = transform.translation.xy();
+    player_noise.is_running = is_running;
+    player_noise.moving = dir.length_squared() > 0.0;
 
     if player_data.satamina <= player_data.min_satamina {
         speed *= player_data.fatigue();

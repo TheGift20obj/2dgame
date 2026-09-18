@@ -3,6 +3,7 @@ pub mod lifecycle;
 pub mod loader;
 pub mod menu_ui;
 pub mod monster;
+pub mod monster_ai;
 pub mod physics;
 pub mod player;
 pub mod player_game_ui;

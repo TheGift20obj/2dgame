@@ -1,8 +1,23 @@
 use crate::resourses::physics_resources::*;
 use crate::systems::lifecycle::AppSet;
-use crate::systems::save::{self, ActiveSlot};
+use crate::systems::monster_ai::difficulty::{ActiveDifficulty, Difficulty};
+use crate::systems::monster_ai::hivemind::PlayerEscapeModel;
+use crate::systems::save::{self, ActiveSlot, MonsterSaveData};
 use bevy::app::AppExit;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+
+/// Bundles the session-state resources (and the monster query) the Save
+/// button needs into one system parameter — `button_system` was already
+/// close to Bevy's 16-parameter cap on a plain system function.
+#[derive(SystemParam)]
+struct SaveContext<'w, 's> {
+    active_slot: Res<'w, ActiveSlot>,
+    active_difficulty: Res<'w, ActiveDifficulty>,
+    score: Res<'w, Score>,
+    escape_model: Res<'w, PlayerEscapeModel>,
+    monster_query: Query<'w, 's, (&'static Transform, &'static MonsterAI), With<Monster>>,
+}
 
 const NORMAL_BUTTON: Color = Color::srgb(0.15, 0.15, 0.15);
 const HOVERED_BUTTON: Color = Color::srgb(0.25, 0.25, 0.25);
@@ -231,7 +246,7 @@ pub fn setup_slot_select(commands: &mut Commands, asset_server: &Res<AssetServer
                                     ..default()
                                 },
                             ));
-                            row.spawn(small_button_bundle(MenuButtonAction::PlaySlot(slot)))
+                            row.spawn(small_button_bundle(MenuButtonAction::PickDifficulty(slot)))
                                 .with_children(|p| {
                                     p.spawn(small_button_text("Start", &font));
                                 });
@@ -241,6 +256,60 @@ pub fn setup_slot_select(commands: &mut Commands, asset_server: &Res<AssetServer
 
             parent
                 .spawn(menu_button_bundle(MenuButtonAction::BackToMenu))
+                .with_children(|p| {
+                    p.spawn(menu_button_text("Back", &font));
+                });
+        });
+}
+
+pub fn setup_difficulty_select(commands: &mut Commands, asset_server: &Res<AssetServer>, slot: u8) {
+    let font = asset_server.load("fonts/Cantarell-Bold.ttf");
+
+    commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(14.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.05, 0.05, 0.05, 0.95)),
+            MenuRoot,
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                Text::new("Monster AI Difficulty"),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 32.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+                Node {
+                    margin: UiRect::bottom(Val::Px(10.0)),
+                    ..default()
+                },
+            ));
+
+            for (label, difficulty) in [
+                ("Easy", Difficulty::Easy),
+                ("Normal", Difficulty::Normal),
+                ("Hard", Difficulty::Hard),
+            ] {
+                parent
+                    .spawn(menu_button_bundle(MenuButtonAction::StartWithDifficulty(
+                        slot, difficulty,
+                    )))
+                    .with_children(|p| {
+                        p.spawn(menu_button_text(label, &font));
+                    });
+            }
+
+            parent
+                .spawn(menu_button_bundle(MenuButtonAction::BackToSlotSelect))
                 .with_children(|p| {
                     p.spawn(menu_button_text("Back", &font));
                 });
@@ -351,11 +420,10 @@ fn button_system(
     mut leave_requested: MessageWriter<LeaveRequested>,
     mut respawn_requested: MessageWriter<RespawnRequested>,
     mut resume_status: ResMut<ResumeStatus>,
-    active_slot: Res<ActiveSlot>,
     player_query: Query<(&Transform, &PlayerData), With<Player>>,
-    points_query: Query<&PointText>,
     menu_assets: Res<MenuAssets>,
     mut mouse_input: ResMut<ButtonInput<MouseButton>>,
+    save_ctx: SaveContext,
 ) {
     for (interaction, mut bg_color, menu_button) in &mut interaction_query {
         match *interaction {
@@ -389,8 +457,33 @@ fn button_system(
                         MenuButtonAction::PlaySlot(slot) => {
                             // The lifecycle despawns the slot-select screen and its
                             // camera itself, in the same batch as spawning the player —
-                            // not here, to avoid a frame with neither in place.
-                            play_requested.write(PlayRequested(slot));
+                            // not here, to avoid a frame with neither in place. This
+                            // slot already has a save, so its own saved difficulty
+                            // applies (None here).
+                            play_requested.write(PlayRequested {
+                                slot,
+                                difficulty: None,
+                            });
+                        }
+                        MenuButtonAction::PickDifficulty(slot) => {
+                            for root in menu_root_query.iter() {
+                                commands.entity(root).despawn();
+                            }
+                            setup_difficulty_select(&mut commands, &asset_server, slot);
+                        }
+                        MenuButtonAction::StartWithDifficulty(slot, difficulty) => {
+                            // The lifecycle despawns this screen and its camera itself,
+                            // in the same batch as spawning the player.
+                            play_requested.write(PlayRequested {
+                                slot,
+                                difficulty: Some(difficulty),
+                            });
+                        }
+                        MenuButtonAction::BackToSlotSelect => {
+                            for root in menu_root_query.iter() {
+                                commands.entity(root).despawn();
+                            }
+                            setup_slot_select(&mut commands, &asset_server);
                         }
                         MenuButtonAction::ResetSlot(slot) => {
                             save::delete_save(slot);
@@ -414,14 +507,13 @@ fn button_system(
                             for root in menu_root_query.iter() {
                                 commands.entity(root).despawn();
                             }
-                            // NOTE: this resets the displayed points to 0, matching a
-                            // pre-existing quirk (the points UI entity is destroyed on
-                            // pause and its live value isn't captured) — not fixed here,
-                            // out of scope for this change.
+                            // `score` is a resource independent of the UI
+                            // entity's lifetime, so it survived the pause
+                            // menu despawning the old points display above.
                             crate::systems::player_game_ui::spawn_health_bar(
                                 &mut commands,
                                 &asset_server,
-                                0,
+                                save_ctx.score.0,
                             );
                             crate::systems::player_game_ui::spawn_inventory_bar(
                                 &mut commands,
@@ -429,13 +521,34 @@ fn button_system(
                             );
                         }
                         MenuButtonAction::Save => {
-                            if let Some(slot) = active_slot.0 {
+                            if let Some(slot) = save_ctx.active_slot.0 {
                                 if let Ok((transform, player_data)) = player_query.single() {
-                                    let points =
-                                        points_query.iter().next().map(|p| p.0).unwrap_or(0);
+                                    let monsters: Vec<MonsterSaveData> = save_ctx
+                                        .monster_query
+                                        .iter()
+                                        .map(|(transform, ai)| MonsterSaveData {
+                                            position: (
+                                                transform.translation.x,
+                                                transform.translation.y,
+                                            ),
+                                            health: ai.health,
+                                        })
+                                        .collect();
+                                    let pack_escape_dir = (
+                                        save_ctx.escape_model.avg_flee_dir.x,
+                                        save_ctx.escape_model.avg_flee_dir.y,
+                                    );
                                     save::write_save(
                                         slot,
-                                        &save::capture_save_data(transform, player_data, points),
+                                        &save::capture_save_data(
+                                            transform,
+                                            player_data,
+                                            save_ctx.score.0,
+                                            save_ctx.active_difficulty.0,
+                                            monsters,
+                                            pack_escape_dir,
+                                            save_ctx.escape_model.samples(),
+                                        ),
                                     );
                                 }
                             }

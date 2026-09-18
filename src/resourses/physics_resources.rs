@@ -60,8 +60,21 @@ pub struct AttackStatus(pub bool);
 #[derive(Component)]
 pub struct FinishStatus(pub bool);
 
+/// Display cache only — the number shown in the points UI. `Score` (below)
+/// is the actual source of truth, so this stays correct across the UI
+/// entity itself being despawned/respawned (pause, death, leave) instead of
+/// resetting to whatever hardcoded value a respawn site happens to pass.
 #[derive(Component)]
 pub struct PointText(pub u32);
+
+/// Single source of truth for the player's kill-count score, independent of
+/// any UI entity's lifetime. Previously the *only* place score lived was the
+/// `PointText` UI component itself, which made it trivially easy to lose —
+/// e.g. opening Pause despawned it, and Resume respawned the UI with a
+/// hardcoded 0, silently zeroing the player's score. Set on Play/Respawn
+/// (from the save file or carried over), read wherever a save is written.
+#[derive(Resource, Default, Clone, Copy)]
+pub struct Score(pub u32);
 
 #[derive(Component, Clone)]
 pub struct AnimationIndices {
@@ -293,8 +306,13 @@ pub struct FunctionalEvent {
 
 /// UI intent: the user picked a save slot to play. The game lifecycle owns
 /// deciding what "starting" means (fresh player, or load from that slot).
+/// `difficulty` is only consulted for a fresh (no existing save) slot — an
+/// existing slot always keeps its own saved difficulty.
 #[derive(Message)]
-pub struct PlayRequested(pub u8);
+pub struct PlayRequested {
+    pub slot: u8,
+    pub difficulty: Option<crate::systems::monster_ai::difficulty::Difficulty>,
+}
 
 /// Player-domain report: the player has died. The game lifecycle owns
 /// deciding what happens next (cleanup, despawn, death screen).
@@ -330,12 +348,16 @@ pub struct InventoryImage(pub String);
 pub const WORLD_SIZE: i32 = 96; // liczba kafelków widocznych w danym "obszarze"
 pub const TILE_SIZE: f32 = 64.0;
 
+/// Range of the player's own `PointLight2d` (see `player::init`). Shared out
+/// so monster AI can tell whether a monster is within the player's light
+/// without duplicating the number — see `monster::MonsterCombatConfig`'s
+/// darkness speed boost.
+pub const PLAYER_LIGHT_RANGE: f32 = 750.0;
+
 #[derive(Component)]
 pub struct MonsterAI {
-    pub target_player: bool,
     pub random_timer: Timer,
     pub random_dir: Vec2,
-    pub action_timer: Timer,
     pub action_cooldown: Timer,
     pub health: f32,
     pub last_health: f32,
@@ -348,12 +370,18 @@ pub enum MenuButtonAction {
     Play,
     Options,
     Exit,
-    /// Slot-select: start a fresh save here, or continue an existing one.
+    /// Slot-select: continue an existing save.
     PlaySlot(u8),
+    /// Slot-select: start a fresh save in an empty slot -> difficulty select.
+    PickDifficulty(u8),
+    /// Difficulty-select: start a fresh save with the chosen difficulty.
+    StartWithDifficulty(u8, crate::systems::monster_ai::difficulty::Difficulty),
     ResetSlot(u8),
     DeleteSlot(u8),
     /// Slot-select -> back to the main menu.
     BackToMenu,
+    /// Difficulty-select -> back to the slot-select screen.
+    BackToSlotSelect,
     /// Pause menu.
     Resume,
     Save,
