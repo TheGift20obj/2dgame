@@ -1,25 +1,23 @@
 use crate::resourses::physics_resources::*;
 use bevy::color::palettes::css::*;
 use bevy::prelude::*;
-pub struct HudPlugin;
 
-const SCALE: f32 = 1.5;
+pub struct HudPlugin;
+const SLOT: f32 = 58.0;
 
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(InventoryState::default()).add_systems(
             Update,
             (
-                update_health_bar,
-                update_satamina_bar,
-                update_points_text,
-                handle_inventory_input,
-                update_inventory_ui,
-                ui_use_item,
+                update_health,
+                update_stamina,
+                update_score,
+                toggle_inventory,
+                update_inventory,
+                use_hotbar_item,
             )
-                .run_if(|status: Res<GameStatus>, status2: Res<ResumeStatus>| {
-                    status.0 && !status2.0
-                })
+                .run_if(|game: Res<GameStatus>, pause: Res<ResumeStatus>| game.0 && !pause.0)
                 .in_set(crate::systems::lifecycle::AppSet::Gameplay),
         );
     }
@@ -30,336 +28,322 @@ impl Default for InventoryState {
         Self {
             selected: 0,
             slots: 10,
+            open: false,
         }
     }
 }
 
-pub fn spawn_health_bar(
-    commands: &mut Commands,
-    asset_server: &Res<AssetServer>,
-    initial_points: u32,
-) {
-    // Kontener paska zdrowia
-    commands
-        .spawn((
-            PlayerUIs,
-            Node {
-                position_type: PositionType::Absolute,
-                top: Val::Px(10.0 * SCALE),
-                left: Val::Px(10.0 * SCALE),
-                width: Val::Px(200.0 * SCALE),
-                height: Val::Px(20.0 * SCALE),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.1, 0.1, 0.1)), // tło
-        ))
-        .with_children(|builder| {
-            // Pasek HP
-            builder.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    ..default()
-                },
-                BackgroundColor(RED.into()),
-                HealthBar,
-            ));
-        });
-
-    commands
-        .spawn((
-            PlayerUIs,
-            Node {
-                position_type: PositionType::Absolute,
-                top: Val::Px(40.0 * SCALE),
-                left: Val::Px(10.0 * SCALE),
-                width: Val::Px(175.0 * SCALE),
-                height: Val::Px(10.0 * SCALE),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.1, 0.1, 0.1)), // tło
-        ))
-        .with_children(|builder| {
-            // Pasek HP
-            builder.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.0, 0.8, 0.0)),
-                SataminaBar,
-            ));
-        });
-
-    // Pasek punktów
-    commands
-        .spawn((
-            PlayerUIs,
-            Node {
-                position_type: PositionType::Absolute,
-                top: Val::Px(60.0 * SCALE),
-                left: Val::Px(10.0 * SCALE),
-                width: Val::Px(150.0),
-                height: Val::Px(20.0),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.1, 0.1, 0.1)),
-        ))
-        .with_children(|builder| {
-            builder.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    ..default()
-                },
-                Text::new(format!("Points: {}", initial_points)),
-                TextFont {
-                    font: asset_server.load("fonts/Cantarell-Bold.ttf"),
-                    font_size: 14.0,
-                    ..default()
-                },
-                TextColor(Color::WHITE),
-                PointText(initial_points),
-            ));
-        });
+pub fn spawn_health_bar(commands: &mut Commands, assets: &Res<AssetServer>, points: u32) {
+    spawn_stat(
+        commands,
+        Vec2::new(10., 10.),
+        Vec2::new(300., 28.),
+        RED.into(),
+        HealthBar,
+    );
+    spawn_stat(
+        commands,
+        Vec2::new(10., 48.),
+        Vec2::new(260., 14.),
+        Color::srgb(0., 0.8, 0.).into(),
+        SataminaBar,
+    );
+    commands.spawn((
+        PlayerUIs,
+        GameplayHud,
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(72.),
+            left: Val::Px(10.),
+            ..default()
+        },
+        Text::new(format!("Points: {points}")),
+        TextFont {
+            font: assets.load("fonts/Cantarell-Bold.ttf"),
+            font_size: 18.,
+            ..default()
+        },
+        TextColor(Color::WHITE),
+        PointText(points),
+    ));
 }
 
-pub fn spawn_inventory_bar(commands: &mut Commands, asset_server: &Res<AssetServer>) {
-    // Kontener główny: pozycjonowany absolutnie, na dole, pełna szerokość
+fn spawn_stat<T: Component>(
+    commands: &mut Commands,
+    at: Vec2,
+    size: Vec2,
+    color: BackgroundColor,
+    marker: T,
+) {
+    commands.spawn((
+        PlayerUIs,
+        GameplayHud,
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(at.y),
+            left: Val::Px(at.x),
+            width: Val::Px(size.x),
+            height: Val::Px(size.y),
+            ..default()
+        },
+        BackgroundColor(Color::srgb(0.08, 0.08, 0.08)),
+        children![(
+            Node {
+                width: Val::Percent(100.),
+                height: Val::Percent(100.),
+                ..default()
+            },
+            color,
+            marker
+        )],
+    ));
+}
+
+pub fn spawn_inventory_bar(commands: &mut Commands, assets: &Res<AssetServer>) {
     commands
         .spawn((
             PlayerUIs,
+            InventoryHotbar,
             Node {
                 position_type: PositionType::Absolute,
-                bottom: Val::Px(20.0),
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                height: Val::Px(60.0),
-                display: Display::Flex,
-                justify_content: JustifyContent::Center, // wyśrodkuj dzieci poziomo
-                align_items: AlignItems::Center,         // wyśrodkuj pionowo
+                bottom: Val::Px(22.),
+                left: Val::Percent(50.),
+                margin: UiRect::left(Val::Px(-325.)),
+                width: Val::Px(650.),
+                height: Val::Px(72.),
+                display: Display::Grid,
+                grid_template_columns: RepeatedGridTrack::px(10, SLOT),
+                column_gap: Val::Px(8.),
+                padding: UiRect::all(Val::Px(7.)),
                 ..default()
             },
-            BackgroundColor(Color::NONE),
+            BackgroundColor(Color::srgba(0.05, 0.05, 0.06, 0.88)),
         ))
-        .with_children(|builder| {
-            // Grid 10 slotów
-            builder
+        .with_children(|parent| {
+            for slot in 0..10 {
+                spawn_slot(parent, assets, slot, true);
+            }
+        });
+    commands
+        .spawn((
+            PlayerUIs,
+            InventoryOverlay,
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Percent(100.),
+                height: Val::Percent(100.),
+                display: Display::None,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0., 0., 0., 0.68)),
+        ))
+        .with_children(|parent| {
+            parent
                 .spawn((
                     Node {
+                        width: Val::Px(720.),
+                        height: Val::Px(390.),
                         display: Display::Grid,
-                        grid_template_columns: RepeatedGridTrack::px(10, 50.0), // 10 kolumn po 50px
-                        column_gap: Val::Px(5.0),
+                        grid_template_columns: RepeatedGridTrack::px(10, SLOT),
+                        grid_template_rows: RepeatedGridTrack::px(4, SLOT),
+                        column_gap: Val::Px(10.),
+                        row_gap: Val::Px(12.),
+                        padding: UiRect::all(Val::Px(20.)),
                         ..default()
                     },
-                    BackgroundColor(Color::NONE),
+                    BackgroundColor(Color::srgb(0.10, 0.10, 0.13)),
                 ))
-                .with_children(|builder| {
-                    for i in 0..10 {
-                        builder.spawn((
-                            Node {
-                                width: Val::Px(50.0),
-                                height: Val::Px(50.0),
-                                border: UiRect::all(Val::Px(2.0)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::NONE),
-                            ImageNode::new(asset_server.load("textures/evil_dirt.png")),
-                            Text::new(format!("{}", (i + 1) % 10)),
-                            TextFont {
-                                font: asset_server.load("fonts/Cantarell-Bold.ttf"),
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(Color::WHITE),
-                            children![(
-                                Node {
-                                    width: Val::Px(50.0),
-                                    height: Val::Px(50.0),
-                                    border: UiRect::all(Val::Px(2.0)),
-                                    justify_content: JustifyContent::End,
-                                    align_items: AlignItems::End,
-                                    ..default()
-                                },
-                                BackgroundColor(Color::srgba(1.0, 1.0, 0.0, 0.75)), // brak wypełnienia
-                                InventorySlot(i),
-                                InventoryImage("None".to_string()),
-                                ImageNode::new(asset_server.load("textures/empty.png")),
-                                children![(
-                                    Text::new(""),
-                                    TextFont {
-                                        font: asset_server.load("fonts/Cantarell-Bold.ttf"),
-                                        font_size: 14.0,
-                                        ..default()
-                                    },
-                                    TextColor(Color::WHITE),
-                                )]
-                            )],
-                        ));
+                .with_children(|grid| {
+                    for row in 0..4 {
+                        for col in 0..10 {
+                            let slot = if row == 3 { col } else { 10 + row * 10 + col };
+                            spawn_slot(grid, assets, slot, row == 3);
+                        }
                     }
                 });
         });
 }
 
-fn update_health_bar(
-    mut player_query: Query<&PlayerData, (With<Player>, Without<Pending>)>,
-    mut query: Query<&mut Node, With<HealthBar>>,
+fn spawn_slot(
+    parent: &mut ChildSpawnerCommands,
+    assets: &Res<AssetServer>,
+    slot: usize,
+    hotbar: bool,
 ) {
-    let player_data = if let Ok(d) = player_query.single_mut() {
-        d
+    let background = if hotbar {
+        Color::srgba(0.40, 0.31, 0.10, 0.96)
     } else {
-        return;
+        Color::srgba(0.20, 0.20, 0.25, 0.96)
     };
-
-    if let Ok(mut bar) = query.single_mut() {
-        let percent = (player_data.health / player_data.max_health).clamp(0.0, 1.0) * 100.0;
-        bar.width = Val::Percent(percent);
-    }
+    parent.spawn((
+        Node {
+            width: Val::Px(SLOT),
+            height: Val::Px(SLOT),
+            justify_content: JustifyContent::End,
+            align_items: AlignItems::End,
+            ..default()
+        },
+        BackgroundColor(background),
+        InventorySlot(slot),
+        InventoryImage("None".into()),
+        ImageNode::new(assets.load("textures/empty.png")),
+        children![(
+            Text::new(""),
+            TextFont {
+                font: assets.load("fonts/Cantarell-Bold.ttf"),
+                font_size: 16.,
+                ..default()
+            },
+            TextColor(Color::WHITE)
+        )],
+    ));
 }
 
-fn update_satamina_bar(
-    mut player_query: Query<&PlayerData, (With<Player>, Without<Pending>)>,
-    mut query: Query<&mut Node, With<SataminaBar>>,
+fn toggle_inventory(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut state: ResMut<InventoryState>,
+    mut ui_nodes: Query<(
+        &mut Node,
+        Option<&InventoryHotbar>,
+        Option<&InventoryOverlay>,
+        Option<&GameplayHud>,
+    )>,
 ) {
-    let player_data = if let Ok(d) = player_query.single_mut() {
-        d
-    } else {
-        return;
-    };
-
-    if let Ok(mut bar) = query.single_mut() {
-        let percent = (player_data.satamina / player_data.max_satamina).clamp(0.0, 1.0) * 100.0;
-        bar.width = Val::Percent(percent);
-    }
-}
-
-/// Keeps the points display in sync with `Score` (the actual source of
-/// truth — see its doc comment) instead of the old approach of mutating the
-/// `Text` directly wherever a kill happened to be handled, which broke the
-/// moment the UI entity was ever recreated (pause/respawn/etc.) without that
-/// exact code path also re-threading the right number through.
-fn update_points_text(score: Res<Score>, mut query: Query<(&mut Text, &mut PointText)>) {
-    if !score.is_changed() {
-        return;
-    }
-    for (mut text, mut point_text) in &mut query {
-        point_text.0 = score.0;
-        *text = Text::new(format!("Points: {}", score.0));
-    }
-}
-
-fn handle_inventory_input(keyboard: Res<ButtonInput<KeyCode>>, mut state: ResMut<InventoryState>) {
-    /*// Otwieranie/zamykanie ekwipunku klawiszem I
-    if keyboard.just_pressed(KeyCode::KeyI) {
+    if keyboard.just_pressed(KeyCode::KeyE) {
         state.open = !state.open;
-    }*/
-
-    // Zmiana slotu klawiszami 1-0
-    for i in 0..state.slots {
-        let key = match i {
-            0 => KeyCode::Digit1,
-            1 => KeyCode::Digit2,
-            2 => KeyCode::Digit3,
-            3 => KeyCode::Digit4,
-            4 => KeyCode::Digit5,
-            5 => KeyCode::Digit6,
-            6 => KeyCode::Digit7,
-            7 => KeyCode::Digit8,
-            8 => KeyCode::Digit9,
-            9 => KeyCode::Digit0,
-            _ => continue,
-        };
-        if keyboard.just_pressed(key) {
-            state.selected = i;
+        for (mut node, hotbar, overlay, hud) in &mut ui_nodes {
+            if hotbar.is_some() {
+                node.display = if state.open {
+                    Display::None
+                } else {
+                    Display::Grid
+                };
+            } else if overlay.is_some() {
+                node.display = if state.open {
+                    Display::Flex
+                } else {
+                    Display::None
+                };
+            } else if hud.is_some() {
+                node.display = if state.open {
+                    Display::None
+                } else {
+                    Display::Flex
+                };
+            }
+        }
+    }
+    if !state.open {
+        let keys = [
+            KeyCode::Digit1,
+            KeyCode::Digit2,
+            KeyCode::Digit3,
+            KeyCode::Digit4,
+            KeyCode::Digit5,
+            KeyCode::Digit6,
+            KeyCode::Digit7,
+            KeyCode::Digit8,
+            KeyCode::Digit9,
+            KeyCode::Digit0,
+        ];
+        for (slot, key) in keys.into_iter().enumerate() {
+            if keyboard.just_pressed(key) {
+                state.selected = slot;
+            }
         }
     }
 }
 
-// === Aktualizacja UI ekwipunku ===
-
-fn update_inventory_ui(
-    state: Res<InventoryState>,
+fn update_inventory(
     mut slots: Query<(
-        &mut BackgroundColor,
         &mut ImageNode,
         &InventorySlot,
         &mut InventoryImage,
         &Children,
     )>,
-    mut text_q: Query<&mut Text>,
-    query: Query<&PlayerData, With<Player>>,
-    asset_server: Res<AssetServer>,
+    mut texts: Query<&mut Text>,
+    player: Query<&PlayerData, With<Player>>,
+    assets: Res<AssetServer>,
 ) {
-    // Pokaż/ukryj panel ekwipunku
-    let Ok(player_data) = query.single() else {
+    let Ok(player) = player.single() else {
         return;
     };
-
-    // Podświetl aktywny slot
-    for (mut color, mut image_node, slot, mut image, child) in &mut slots {
-        let Ok(mut text) = text_q.get_mut(child[0]) else {
+    for (mut icon, slot, mut cache, children) in &mut slots {
+        let Ok(mut text) = texts.get_mut(children[0]) else {
             continue;
         };
-        if let Some(item) = player_data.inventory.get_item(slot.0 as u32) {
-            if image.0 != item.id {
-                image.0 = item.id.clone();
-                *image_node = ImageNode::new(asset_server.load(&item.path));
+        if let Some(item) = player.inventory.get_item(slot.0 as u32) {
+            if cache.0 != item.id {
+                cache.0 = item.id.clone();
+                *icon = ImageNode::new(assets.load(&item.path));
             }
-            // The item type can remain unchanged while its stack is changed
-            // by pickup, drop, or consumption, so its amount must be updated
-            // independently from the icon.
-            let amount = if item.id != "sword_basic" && item.amount > 0 {
-                item.amount.to_string()
-            } else {
+            *text = Text::new(if item.id == "sword_basic" {
                 String::new()
-            };
-            if text.0 != amount {
-                *text = Text::new(amount);
-            }
-        } else {
-            if image.0 != "None" {
-                image.0 = "None".to_string();
-                *image_node = ImageNode::new(asset_server.load("textures/empty.png"));
-                *text = Text::new("");
-            }
-        }
-        if slot.0 == state.selected {
-            *color = BackgroundColor(Color::srgba(1.0, 0.0, 0.0, 0.25));
-        } else {
-            *color = BackgroundColor(Color::srgba(1.0, 1.0, 0.0, 0.25));
+            } else {
+                item.amount.to_string()
+            });
+        } else if cache.0 != "None" {
+            cache.0 = "None".into();
+            *icon = ImageNode::new(assets.load("textures/empty.png"));
+            *text = Text::new("");
         }
     }
 }
-
-fn ui_use_item(
-    mut ev_consume: ResMut<Messages<ConsumeEvent>>,
-    mut ev_func: ResMut<Messages<FunctionalEvent>>,
-    //keyboard: Res<ButtonInput<KeyCode>>,
+fn update_health(
+    p: Query<&PlayerData, (With<Player>, Without<Pending>)>,
+    mut q: Query<&mut Node, With<HealthBar>>,
+) {
+    if let (Ok(p), Ok(mut n)) = (p.single(), q.single_mut()) {
+        n.width = Val::Percent((p.health / p.max_health * 100.).clamp(0., 100.));
+    }
+}
+fn update_stamina(
+    p: Query<&PlayerData, (With<Player>, Without<Pending>)>,
+    mut q: Query<&mut Node, With<SataminaBar>>,
+) {
+    if let (Ok(p), Ok(mut n)) = (p.single(), q.single_mut()) {
+        n.width = Val::Percent((p.satamina / p.max_satamina * 100.).clamp(0., 100.));
+    }
+}
+fn update_score(score: Res<Score>, mut q: Query<(&mut Text, &mut PointText)>) {
+    if score.is_changed() {
+        for (mut t, mut p) in &mut q {
+            p.0 = score.0;
+            *t = Text::new(format!("Points: {}", score.0));
+        }
+    }
+}
+fn use_hotbar_item(
+    mut food: ResMut<Messages<ConsumeEvent>>,
+    mut functional: ResMut<Messages<FunctionalEvent>>,
     mouse: Res<ButtonInput<MouseButton>>,
     state: Res<InventoryState>,
-    query: Query<&PlayerData, With<Player>>,
+    player: Query<&PlayerData, With<Player>>,
 ) {
-    if mouse.just_pressed(MouseButton::Left) {
-        let Ok(player_data) = query.single() else {
-            return;
-        };
-        if let Some(item) = player_data.inventory.get_item(state.selected as u32) {
-            match item.item_type.as_str() {
-                "food" => {
-                    ev_consume.write(ConsumeEvent {
-                        slot: state.selected as u32,
-                        item_id: item.id.clone(),
-                    });
-                }
-                "weapon" => {
-                    ev_func.write(FunctionalEvent {
-                        slot: state.selected as u32,
-                        item_id: item.id.clone(),
-                    });
-                }
-                _ => {} // opcjonalnie dla innych typów
-            }
+    if state.open || !mouse.just_pressed(MouseButton::Left) {
+        return;
+    }
+    let Ok(player) = player.single() else {
+        return;
+    };
+    let Some(item) = player.inventory.get_item(state.selected as u32) else {
+        return;
+    };
+    match item.item_type.as_str() {
+        "food" => {
+            food.write(ConsumeEvent {
+                slot: state.selected as u32,
+                item_id: item.id.clone(),
+            });
         }
+        "weapon" => {
+            functional.write(FunctionalEvent {
+                slot: state.selected as u32,
+                item_id: item.id.clone(),
+            });
+        }
+        _ => {}
     }
 }

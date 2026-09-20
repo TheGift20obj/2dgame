@@ -362,6 +362,7 @@ pub struct YSort {
 pub struct InventoryState {
     pub selected: usize, // aktualnie wybrany slot
     pub slots: usize,    // liczba slotów
+    pub open: bool,
 }
 
 #[derive(Component)]
@@ -369,6 +370,13 @@ pub struct InventorySlot(pub usize);
 
 #[derive(Component)]
 pub struct InventoryImage(pub String);
+
+#[derive(Component)]
+pub struct InventoryHotbar;
+#[derive(Component)]
+pub struct InventoryOverlay;
+#[derive(Component)]
+pub struct GameplayHud;
 
 pub const WORLD_SIZE: i32 = 96; // liczba kafelków widocznych w danym "obszarze"
 pub const TILE_SIZE: f32 = 64.0;
