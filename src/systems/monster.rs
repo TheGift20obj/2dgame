@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use rapier2d::prelude::*;
 
 use crate::resourses::physics_resources::*;
+use crate::systems::items::spawn_world_item;
 use crate::systems::monster_ai::difficulty::{
     ActiveDifficulty, MonsterSenseConfig, population_config, sense_config,
 };
@@ -14,6 +15,8 @@ use crate::systems::monster_ai::state::{self, MonsterState};
 use crate::systems::physics::remove_rigid_body;
 use crate::systems::terrain::{self, TerrainMap};
 use bevy::camera::{ImageRenderTarget, RenderTarget};
+use bevy::ecs::system::SystemParam;
+use rand::Rng;
 use std::collections::HashMap;
 
 pub struct MonsterPlugin;
@@ -26,6 +29,20 @@ struct MonsterSpawnTimer(Timer);
 /// (including any still `Pending` and mid-flight through `loader::inspect`).
 #[derive(Resource, Default)]
 struct MonsterResetPending(bool);
+
+/// Keeps the already large monster AI system below Bevy's system-parameter
+/// limit while grouping the two resources needed to materialize loot.
+#[derive(SystemParam)]
+struct MonsterLootAssets<'w> {
+    item_config: Res<'w, ItemConfig>,
+    asset_server: Res<'w, AssetServer>,
+}
+
+#[derive(SystemParam)]
+struct MonsterSenseInputs<'w> {
+    difficulty: Res<'w, ActiveDifficulty>,
+    noise: Res<'w, PlayerNoise>,
+}
 
 //use bevy_2d_screen_space_lightmaps::lightmap_plugin::lightmap_plugin::*;
 use bevy::camera::visibility::RenderLayers;
@@ -523,8 +540,8 @@ fn monster_ai(
     combat_config: Res<MonsterCombatConfig>,
     atlas_handles: Res<AtlasHandles>,
     terrain_map: Res<TerrainMap>,
-    difficulty: Res<ActiveDifficulty>,
-    noise: Res<PlayerNoise>,
+    sense_inputs: MonsterSenseInputs,
+    loot_assets: MonsterLootAssets,
     mut pack: PackComms,
 ) {
     let (player_transform, mut player_data_some): (Transform, Option<Mut<PlayerData>>) =
@@ -536,7 +553,7 @@ fn monster_ai(
 
     let despawn_distance = config.max_despawn_distance * TILE_SIZE;
     let now = time.elapsed_secs();
-    let sense_cfg = sense_config(difficulty.0);
+    let sense_cfg = sense_config(sense_inputs.difficulty.0);
     let player_pos = player_transform.translation.xy();
     let has_player = player_data_some.is_some();
     // Alerts broadcast by packmates during the *previous* pass — consulted
@@ -623,6 +640,21 @@ fn monster_ai(
             }
             if ai.health <= 0.0 {
                 score.0 += 1;
+                if let Some(apple) = loot_assets.item_config.items.get("apple_red") {
+                    let apple_count = rand::thread_rng().gen_range(2..=4);
+                    for index in 0..apple_count {
+                        let mut dropped_apple = apple.clone();
+                        dropped_apple.amount = 1;
+                        let angle = index as f32 / apple_count as f32 * std::f32::consts::TAU;
+                        let position = monster_pos + Vec2::from_angle(angle) * 18.0;
+                        spawn_world_item(
+                            &mut commands,
+                            &loot_assets.asset_server,
+                            dropped_apple,
+                            position,
+                        );
+                    }
+                }
                 let mut colliders_clone = Vec::new();
                 if let Some(rb) = rigid_bodies.0.get(rb_handle.0) {
                     for collider_handle in rb.colliders() {
@@ -660,7 +692,7 @@ fn monster_ai(
                         &terrain_map,
                         monster_pos,
                         player_pos,
-                        &noise,
+                        &sense_inputs.noise,
                         &sense_cfg,
                         combat_config.attack_range,
                         now,

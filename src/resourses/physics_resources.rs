@@ -97,6 +97,11 @@ pub struct PlayerUIs;
 #[derive(Component)]
 pub struct PlayerSprite;
 
+/// Last movement direction of the player. World interactions use it to put
+/// dropped items in front of the character without depending on the camera.
+#[derive(Component)]
+pub struct FacingDirection(pub Vec2);
+
 #[derive(Component)]
 pub struct WaterSprite;
 
@@ -166,6 +171,26 @@ impl Inventory {
         } else {
             false
         }
+    }
+
+    /// Adds an item to an existing stack when possible, otherwise uses the
+    /// first free slot. Returns false only when every slot is occupied.
+    pub fn try_add_item(&mut self, item: Item) -> bool {
+        if item.id != "sword_basic"
+            && let Some(existing) = self
+                .items
+                .values_mut()
+                .find(|existing| existing.id == item.id)
+        {
+            existing.amount = existing.amount.saturating_add(item.amount);
+            return true;
+        }
+
+        let Some(slot) = (0..self.capacity).find(|slot| !self.items.contains_key(slot)) else {
+            return false;
+        };
+        self.items.insert(slot, item);
+        true
     }
 
     pub fn remove_item(&mut self, slot: u32) -> Option<Item> {
@@ -423,3 +448,49 @@ pub struct SataminaBar;
 
 #[derive(Component)]
 pub struct DebugAI;
+
+#[derive(Component)]
+pub struct WorldItem {
+    pub item: Item,
+}
+
+#[derive(Resource, Default)]
+pub struct WorldItemsState {
+    pub spawned_for_session: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(id: &str, amount: u32) -> Item {
+        Item {
+            id: id.to_string(),
+            path: "textures/empty.png".to_string(),
+            value: [0.0, 0.0],
+            item_type: "test".to_string(),
+            amount,
+        }
+    }
+
+    #[test]
+    fn picked_up_items_stack_before_using_another_slot() {
+        let mut inventory = Inventory::new();
+        inventory.try_add_item(item("apple", 2));
+        inventory.try_add_item(item("apple", 3));
+
+        assert_eq!(inventory.items.len(), 1);
+        assert_eq!(inventory.get_item(0).unwrap().amount, 5);
+    }
+
+    #[test]
+    fn pickup_fails_when_inventory_has_no_matching_stack_or_empty_slot() {
+        let mut inventory = Inventory {
+            items: HashMap::new(),
+            capacity: 1,
+        };
+        inventory.try_add_item(item("apple", 1));
+
+        assert!(!inventory.try_add_item(item("sword", 1)));
+    }
+}

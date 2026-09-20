@@ -17,6 +17,7 @@ use bevy_2d_screen_space_lightmaps::lightmap_plugin::lightmap_plugin::LightmapPl
 use bevy_firefly::prelude::*;
 use std::collections::HashMap;
 use systems::eventer::EventerPlugin;
+use systems::items::WorldItemsPlugin;
 
 use bevy::window::{MonitorSelection, WindowMode};
 use std::path::Path;
@@ -101,6 +102,7 @@ fn main() {
             MonsterPlugin,
             TerrainGenerationPlugin,
             EventerPlugin,
+            WorldItemsPlugin,
             GameLifecyclePlugin,
         ))
         .add_systems(Startup, load_items_config);

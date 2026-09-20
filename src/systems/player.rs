@@ -62,6 +62,7 @@ pub fn init(
             //RenderLayers::from_layers(CAMERA_LAYER_LIGHT),
             Player,
             PlayerData::new(config),
+            FacingDirection(Vec2::X),
             Mesh2d(meshes.add(Rectangle::new(50.0, 42.5))),
             Pending,
             Transform::from_xyz(0.0, 0.0, -32.0),
@@ -223,7 +224,12 @@ fn update(
     time: Res<Time>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut query: Query<
-        (&RigidBodyHandleComponent, &mut Transform, &mut PlayerData),
+        (
+            &RigidBodyHandleComponent,
+            &mut Transform,
+            &mut PlayerData,
+            &mut FacingDirection,
+        ),
         (With<Player>, Without<Pending>),
     >,
     mut rigid_bodies: ResMut<ResRigidBodySet>,
@@ -242,7 +248,7 @@ fn update(
     >,
     mut player_noise: ResMut<PlayerNoise>,
 ) {
-    let Ok((handle, mut transform, mut player_data)) = query.single_mut() else {
+    let Ok((handle, mut transform, mut player_data, mut facing)) = query.single_mut() else {
         return;
     };
 
@@ -264,6 +270,10 @@ fn update(
     }
     if keyboard_input.pressed(KeyCode::KeyD) {
         dir.x += 1.0;
+    }
+
+    if dir != Vec2::ZERO {
+        facing.0 = dir.normalize();
     }
 
     let mut speed = 200.0;

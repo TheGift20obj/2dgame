@@ -305,11 +305,17 @@ fn update_inventory_ui(
             if image.0 != item.id {
                 image.0 = item.id.clone();
                 *image_node = ImageNode::new(asset_server.load(&item.path));
-                if item.amount > 0 {
-                    *text = Text::new(format!("{}", item.amount));
-                } else {
-                    *text = Text::new("");
-                }
+            }
+            // The item type can remain unchanged while its stack is changed
+            // by pickup, drop, or consumption, so its amount must be updated
+            // independently from the icon.
+            let amount = if item.id != "sword_basic" && item.amount > 0 {
+                item.amount.to_string()
+            } else {
+                String::new()
+            };
+            if text.0 != amount {
+                *text = Text::new(amount);
             }
         } else {
             if image.0 != "None" {
