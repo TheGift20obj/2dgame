@@ -5,21 +5,30 @@ use bevy::prelude::*;
 pub struct HudPlugin;
 const SLOT: f32 = 58.0;
 
+/// Item currently carried by the inventory cursor. It is removed from its
+/// source slot immediately, so a second click can place it in any slot or
+/// drop it into the world.
+#[derive(Resource, Default)]
+struct HeldInventoryItem(Option<Item>);
+
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(InventoryState::default()).add_systems(
-            Update,
-            (
-                update_health,
-                update_stamina,
-                update_score,
-                toggle_inventory,
-                update_inventory,
-                use_hotbar_item,
-            )
-                .run_if(|game: Res<GameStatus>, pause: Res<ResumeStatus>| game.0 && !pause.0)
-                .in_set(crate::systems::lifecycle::AppSet::Gameplay),
-        );
+        app.insert_resource(InventoryState::default())
+            .insert_resource(HeldInventoryItem::default())
+            .add_systems(
+                Update,
+                (
+                    update_health,
+                    update_stamina,
+                    update_score,
+                    toggle_inventory,
+                    update_inventory,
+                    interact_with_inventory,
+                    use_hotbar_item,
+                )
+                    .run_if(|game: Res<GameStatus>, pause: Res<ResumeStatus>| game.0 && !pause.0)
+                    .in_set(crate::systems::lifecycle::AppSet::Gameplay),
+            );
     }
 }
 
@@ -186,6 +195,7 @@ fn spawn_slot(
             ..default()
         },
         BackgroundColor(background),
+        Button,
         InventorySlot(slot),
         InventoryImage("None".into()),
         ImageNode::new(assets.load("textures/empty.png")),
@@ -315,6 +325,78 @@ fn update_score(score: Res<Score>, mut q: Query<(&mut Text, &mut PointText)>) {
         }
     }
 }
+
+fn interact_with_inventory(
+    state: Res<InventoryState>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    clicked_slots: Query<(&Interaction, &InventorySlot), (Changed<Interaction>, With<Button>)>,
+    all_slots: Query<&Interaction, With<InventorySlot>>,
+    mut held: ResMut<HeldInventoryItem>,
+    mut player: Query<
+        (&Transform, &FacingDirection, &mut PlayerData),
+        (With<Player>, Without<Pending>),
+    >,
+    mut commands: Commands,
+    assets: Res<AssetServer>,
+) {
+    if !state.open {
+        return;
+    }
+    let Ok((transform, facing, mut data)) = player.single_mut() else {
+        return;
+    };
+
+    let take_one = mouse.pressed(MouseButton::Right);
+    let mut clicked_a_slot = false;
+    for (interaction, slot) in &clicked_slots {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        clicked_a_slot = true;
+        let slot = slot.0 as u32;
+        if held.0.is_none() {
+            held.0 = if take_one {
+                data.inventory.remove_one(slot)
+            } else {
+                data.inventory.remove_item(slot)
+            };
+            continue;
+        }
+
+        let held_item = held.0.take().expect("held item checked above");
+        match data.inventory.items.get_mut(&slot) {
+            None => {
+                data.inventory.items.insert(slot, held_item);
+            }
+            Some(existing) if existing.id == held_item.id && existing.id != "sword_basic" => {
+                existing.amount = existing.amount.saturating_add(held_item.amount);
+            }
+            Some(existing) => {
+                let previous = std::mem::replace(existing, held_item);
+                held.0 = Some(previous);
+            }
+        }
+    }
+
+    if !clicked_a_slot
+        && (mouse.just_pressed(MouseButton::Left) || mouse.just_pressed(MouseButton::Right))
+        && !all_slots
+            .iter()
+            .any(|interaction| *interaction == Interaction::Pressed)
+    {
+        let Some(item) = held.0.take() else {
+            return;
+        };
+        // BLOKADA MIECZA: może zmieniać slot, ale nie może zostać wyrzucony.
+        if item.id == "sword_basic" {
+            held.0 = Some(item);
+            return;
+        }
+        let position = transform.translation.xy() + facing.0.normalize_or_zero() * 72.0;
+        crate::systems::items::spawn_world_item(&mut commands, &assets, item, position);
+    }
+}
+
 fn use_hotbar_item(
     mut food: ResMut<Messages<ConsumeEvent>>,
     mut functional: ResMut<Messages<FunctionalEvent>>,
