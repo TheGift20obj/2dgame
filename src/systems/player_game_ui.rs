@@ -437,37 +437,30 @@ fn interact_with_inventory(
     };
 
     if right {
-        if let Some(stack) = data.inventory.items.get_mut(&slot) {
-            if held.item.as_ref().is_none_or(|item| item.id == stack.id) {
-                let mut one = stack.clone();
-                one.amount = 1;
-                if stack.amount == 1 {
-                    data.inventory.items.remove(&slot);
-                } else {
-                    stack.amount -= 1;
+        if let Some(mut cursor_item) = held.item.take() {
+            // Holding an item: right click places one piece in the target.
+            match data.inventory.items.get_mut(&slot) {
+                None => {
+                    let mut one = cursor_item.clone();
+                    one.amount = 1;
+                    data.inventory.items.insert(slot, one);
+                    cursor_item.amount -= 1;
                 }
-                match held.item.as_mut() {
-                    Some(item) => item.amount = item.amount.saturating_add(1),
-                    None => {
-                        held.item = Some(one);
-                        held.source_slot = Some(slot);
-                    }
+                Some(target) if target.id == cursor_item.id && target.id != "sword_basic" => {
+                    target.amount = target.amount.saturating_add(1);
+                    cursor_item.amount -= 1;
                 }
-                return;
+                Some(_) => {}
             }
-        }
-        if !data.inventory.items.contains_key(&slot) {
-            if let Some(mut item) = held.item.take() {
-                let mut one = item.clone();
-                one.amount = 1;
-                item.amount -= 1;
-                data.inventory.items.insert(slot, one);
-                if item.amount > 0 {
-                    held.item = Some(item);
-                } else {
-                    held.source_slot = None;
-                }
+            if cursor_item.amount > 0 {
+                held.item = Some(cursor_item);
+            } else {
+                held.source_slot = None;
             }
+        } else if let Some(one) = data.inventory.remove_one(slot) {
+            // Empty cursor: right click picks one piece up.
+            held.item = Some(one);
+            held.source_slot = Some(slot);
         }
         return;
     }
