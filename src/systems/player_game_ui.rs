@@ -1,6 +1,7 @@
 use crate::resourses::physics_resources::*;
 use bevy::color::palettes::css::*;
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 
 pub struct HudPlugin;
 const SLOT: f32 = 58.0;
@@ -9,7 +10,16 @@ const SLOT: f32 = 58.0;
 /// source slot immediately, so a second click can place it in any slot or
 /// drop it into the world.
 #[derive(Resource, Default)]
-struct HeldInventoryItem(Option<Item>);
+struct HeldInventoryItem {
+    item: Option<Item>,
+    source_slot: Option<u32>,
+}
+
+#[derive(Component)]
+struct HeldItemCursor;
+
+#[derive(Component)]
+struct MainHotbarSlot;
 
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
@@ -24,6 +34,7 @@ impl Plugin for HudPlugin {
                     toggle_inventory,
                     update_inventory,
                     interact_with_inventory,
+                    update_held_cursor,
                     use_hotbar_item,
                 )
                     .run_if(|game: Res<GameStatus>, pause: Res<ResumeStatus>| game.0 && !pause.0)
@@ -109,6 +120,19 @@ fn spawn_stat<T: Component>(
 }
 
 pub fn spawn_inventory_bar(commands: &mut Commands, assets: &Res<AssetServer>) {
+    commands.spawn((
+        PlayerUIs,
+        HeldItemCursor,
+        Node {
+            position_type: PositionType::Absolute,
+            width: Val::Px(44.0),
+            height: Val::Px(44.0),
+            display: Display::None,
+            ..default()
+        },
+        ImageNode::new(assets.load("textures/empty.png")),
+        GlobalZIndex(50),
+    ));
     commands
         .spawn((
             PlayerUIs,
@@ -130,7 +154,7 @@ pub fn spawn_inventory_bar(commands: &mut Commands, assets: &Res<AssetServer>) {
         ))
         .with_children(|parent| {
             for slot in 0..10 {
-                spawn_slot(parent, assets, slot, true);
+                spawn_slot(parent, assets, slot, true, true);
             }
         });
     commands
@@ -168,7 +192,7 @@ pub fn spawn_inventory_bar(commands: &mut Commands, assets: &Res<AssetServer>) {
                     for row in 0..4 {
                         for col in 0..10 {
                             let slot = if row == 3 { col } else { 10 + row * 10 + col };
-                            spawn_slot(grid, assets, slot, row == 3);
+                            spawn_slot(grid, assets, slot, row == 3, false);
                         }
                     }
                 });
@@ -180,13 +204,14 @@ fn spawn_slot(
     assets: &Res<AssetServer>,
     slot: usize,
     hotbar: bool,
+    main_hotbar: bool,
 ) {
     let background = if hotbar {
         Color::srgba(0.40, 0.31, 0.10, 0.96)
     } else {
         Color::srgba(0.20, 0.20, 0.25, 0.96)
     };
-    parent.spawn((
+    let mut entity = parent.spawn((
         Node {
             width: Val::Px(SLOT),
             height: Val::Px(SLOT),
@@ -209,11 +234,16 @@ fn spawn_slot(
             TextColor(Color::WHITE)
         )],
     ));
+    if main_hotbar {
+        entity.insert(MainHotbarSlot);
+    }
 }
 
 fn toggle_inventory(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut state: ResMut<InventoryState>,
+    mut held: ResMut<HeldInventoryItem>,
+    mut player: Query<&mut PlayerData, (With<Player>, Without<Pending>)>,
     mut ui_nodes: Query<(
         &mut Node,
         Option<&InventoryHotbar>,
@@ -222,6 +252,15 @@ fn toggle_inventory(
     )>,
 ) {
     if keyboard.just_pressed(KeyCode::KeyE) {
+        if state.open {
+            if let (Some(item), Some(source), Ok(mut player)) = (
+                held.item.take(),
+                held.source_slot.take(),
+                player.single_mut(),
+            ) {
+                player.inventory.items.insert(source, item);
+            }
+        }
         state.open = !state.open;
         for (mut node, hotbar, overlay, hud) in &mut ui_nodes {
             if hotbar.is_some() {
@@ -272,15 +311,18 @@ fn update_inventory(
         &InventorySlot,
         &mut InventoryImage,
         &Children,
+        &mut BackgroundColor,
+        Option<&MainHotbarSlot>,
     )>,
     mut texts: Query<&mut Text>,
     player: Query<&PlayerData, With<Player>>,
     assets: Res<AssetServer>,
+    state: Res<InventoryState>,
 ) {
     let Ok(player) = player.single() else {
         return;
     };
-    for (mut icon, slot, mut cache, children) in &mut slots {
+    for (mut icon, slot, mut cache, children, mut background, main_hotbar) in &mut slots {
         let Ok(mut text) = texts.get_mut(children[0]) else {
             continue;
         };
@@ -298,6 +340,13 @@ fn update_inventory(
             cache.0 = "None".into();
             *icon = ImageNode::new(assets.load("textures/empty.png"));
             *text = Text::new("");
+        }
+        if main_hotbar.is_some() {
+            *background = BackgroundColor(if slot.0 == state.selected {
+                Color::srgba(0.92, 0.70, 0.10, 1.0)
+            } else {
+                Color::srgba(0.40, 0.31, 0.10, 0.96)
+            });
         }
     }
 }
@@ -329,9 +378,9 @@ fn update_score(score: Res<Score>, mut q: Query<(&mut Text, &mut PointText)>) {
 fn interact_with_inventory(
     state: Res<InventoryState>,
     mouse: Res<ButtonInput<MouseButton>>,
-    clicked_slots: Query<(&Interaction, &InventorySlot), (Changed<Interaction>, With<Button>)>,
-    all_slots: Query<&Interaction, With<InventorySlot>>,
+    slots: Query<(&Interaction, &InventorySlot), With<Button>>,
     mut held: ResMut<HeldInventoryItem>,
+    windows: Query<&Window, With<PrimaryWindow>>,
     mut player: Query<
         (&Transform, &FacingDirection, &mut PlayerData),
         (With<Player>, Without<Pending>),
@@ -339,62 +388,141 @@ fn interact_with_inventory(
     mut commands: Commands,
     assets: Res<AssetServer>,
 ) {
-    if !state.open {
+    let right = mouse.just_pressed(MouseButton::Right);
+    let left = mouse.just_pressed(MouseButton::Left);
+    if !state.open || !(left || right) {
         return;
     }
+    let hovered_slot = slots
+        .iter()
+        .find(|(interaction, _)| **interaction != Interaction::None)
+        .map(|(_, slot)| slot.0 as u32);
     let Ok((transform, facing, mut data)) = player.single_mut() else {
         return;
     };
 
-    let take_one = mouse.pressed(MouseButton::Right);
-    let mut clicked_a_slot = false;
-    for (interaction, slot) in &clicked_slots {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
-        clicked_a_slot = true;
-        let slot = slot.0 as u32;
-        if held.0.is_none() {
-            held.0 = if take_one {
-                data.inventory.remove_one(slot)
-            } else {
-                data.inventory.remove_item(slot)
-            };
-            continue;
-        }
-
-        let held_item = held.0.take().expect("held item checked above");
-        match data.inventory.items.get_mut(&slot) {
-            None => {
-                data.inventory.items.insert(slot, held_item);
-            }
-            Some(existing) if existing.id == held_item.id && existing.id != "sword_basic" => {
-                existing.amount = existing.amount.saturating_add(held_item.amount);
-            }
-            Some(existing) => {
-                let previous = std::mem::replace(existing, held_item);
-                held.0 = Some(previous);
-            }
-        }
-    }
-
-    if !clicked_a_slot
-        && (mouse.just_pressed(MouseButton::Left) || mouse.just_pressed(MouseButton::Right))
-        && !all_slots
-            .iter()
-            .any(|interaction| *interaction == Interaction::Pressed)
-    {
-        let Some(item) = held.0.take() else {
+    let Some(slot) = hovered_slot else {
+        let Ok(window) = windows.single() else {
             return;
         };
-        // BLOKADA MIECZA: może zmieniać slot, ale nie może zostać wyrzucony.
+        let Some(cursor) = window.cursor_position() else {
+            return;
+        };
+        let inside_panel = cursor.x >= (window.width() - 720.0) * 0.5
+            && cursor.x <= (window.width() + 720.0) * 0.5
+            && cursor.y >= (window.height() - 390.0) * 0.5
+            && cursor.y <= (window.height() + 390.0) * 0.5;
+        if inside_panel {
+            return;
+        }
+        let Some(mut item) = held.item.take() else {
+            return;
+        };
         if item.id == "sword_basic" {
-            held.0 = Some(item);
+            held.item = Some(item);
             return;
         }
         let position = transform.translation.xy() + facing.0.normalize_or_zero() * 72.0;
-        crate::systems::items::spawn_world_item(&mut commands, &assets, item, position);
+        if right && item.amount > 1 {
+            let mut one = item.clone();
+            one.amount = 1;
+            item.amount -= 1;
+            held.item = Some(item);
+            crate::systems::items::spawn_world_item(&mut commands, &assets, one, position);
+        } else {
+            held.source_slot = None;
+            crate::systems::items::spawn_world_item(&mut commands, &assets, item, position);
+        }
+        return;
+    };
+
+    if right {
+        if let Some(stack) = data.inventory.items.get_mut(&slot) {
+            if held.item.as_ref().is_none_or(|item| item.id == stack.id) {
+                let mut one = stack.clone();
+                one.amount = 1;
+                if stack.amount == 1 {
+                    data.inventory.items.remove(&slot);
+                } else {
+                    stack.amount -= 1;
+                }
+                match held.item.as_mut() {
+                    Some(item) => item.amount = item.amount.saturating_add(1),
+                    None => {
+                        held.item = Some(one);
+                        held.source_slot = Some(slot);
+                    }
+                }
+                return;
+            }
+        }
+        if !data.inventory.items.contains_key(&slot) {
+            if let Some(mut item) = held.item.take() {
+                let mut one = item.clone();
+                one.amount = 1;
+                item.amount -= 1;
+                data.inventory.items.insert(slot, one);
+                if item.amount > 0 {
+                    held.item = Some(item);
+                } else {
+                    held.source_slot = None;
+                }
+            }
+        }
+        return;
     }
+
+    if held.item.is_none() {
+        held.item = data.inventory.remove_item(slot);
+        held.source_slot = held.item.as_ref().map(|_| slot);
+        return;
+    }
+    let item = held.item.take().expect("held item exists");
+    match data.inventory.items.get_mut(&slot) {
+        None => {
+            data.inventory.items.insert(slot, item);
+            held.source_slot = None;
+        }
+        Some(existing) if existing.id == item.id && item.id != "sword_basic" => {
+            existing.amount = existing.amount.saturating_add(item.amount);
+            held.source_slot = None;
+        }
+        Some(existing) => {
+            let previous = std::mem::replace(existing, item);
+            held.item = Some(previous);
+            held.source_slot = Some(slot);
+        }
+    }
+}
+
+fn update_held_cursor(
+    state: Res<InventoryState>,
+    held: Res<HeldInventoryItem>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mut cursor_ui: Query<(&mut Node, &mut ImageNode), With<HeldItemCursor>>,
+    assets: Res<AssetServer>,
+) {
+    let Ok((mut node, mut image)) = cursor_ui.single_mut() else {
+        return;
+    };
+    let Some(item) = held.item.as_ref() else {
+        node.display = Display::None;
+        return;
+    };
+    if !state.open {
+        node.display = Display::None;
+        return;
+    }
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
+    node.display = Display::Flex;
+    node.left = Val::Px(cursor.x + 10.0);
+    node.top = Val::Px(cursor.y + 10.0);
+    *image = ImageNode::new(assets.load(&item.path));
 }
 
 fn use_hotbar_item(
