@@ -18,71 +18,105 @@
       ],
       "item_type": "weapon",
       "amount": 0
+    },
+    "1": {
+      "id": "apple_red",
+      "path": "textures/items/apple_icon.png",
+      "value": [
+        10.0,
+        25.0
+      ],
+      "item_type": "food",
+      "amount": 16
     }
   },
-  "difficulty": "Normal",
+  "difficulty": "Hard",
   "monsters": [
     {
       "position": [
-        -3240.234,
-        1589.2482
+        -1051.5306,
+        -2235.9846
       ],
-      "health": 20.0,
+      "health": 60.0,
       "kind": "Monster2"
     },
     {
       "position": [
-        -3341.9136,
-        1749.4889
+        -852.9526,
+        -1723.9684
       ],
       "health": 60.0,
+      "kind": "Monster2"
+    },
+    {
+      "position": [
+        -786.42474,
+        -1640.7589
+      ],
+      "health": 100.0,
       "kind": "Monster1"
     },
     {
       "position": [
-        -2339.1326,
-        2733.9302
+        -661.31274,
+        -1671.2866
+      ],
+      "health": 100.0,
+      "kind": "Monster1"
+    },
+    {
+      "position": [
+        -813.24097,
+        -1740.725
+      ],
+      "health": 100.0,
+      "kind": "Monster1"
+    },
+    {
+      "position": [
+        159.57675,
+        -673.1193
       ],
       "health": 100.0,
       "kind": "Monster1"
     }
   ],
   "pack_escape_dir": [
-    0.0,
-    0.0
+    -0.79010123,
+    0.61297643
   ],
-  "pack_escape_samples": 0,
-  "coins": 83,
+  "pack_escape_samples": 628,
+  "coins": 0,
   "level": 1,
-  "xp": 25,
+  "xp": 0,
   "quests": [
     {
       "difficulty": "Easy",
-      "objective": "HitMonsters",
+      "objective": "ConsumeApples",
       "target": 5,
-      "progress": 5,
-      "coin_reward": 83,
-      "xp_reward": 25,
-      "completed": true,
-      "cooldown_ends_at": 1790105606
+      "progress": 0,
+      "coin_reward": 167,
+      "xp_reward": 50,
+      "completed": false,
+      "cooldown_ends_at": null
     },
     {
       "difficulty": "Medium",
-      "objective": "TravelDistance",
-      "target": 892,
-      "progress": 367,
-      "coin_reward": 446,
-      "xp_reward": 223,
+      "objective": "HitMonsters",
+      "target": 22,
+      "progress": 0,
+      "coin_reward": 440,
+      "xp_reward": 220,
       "completed": false,
       "cooldown_ends_at": null
     },
     {
       "difficulty": "Hard",
-      "objective": "TravelDistance",
-      "target": 3144,
-      "progress": 367,
-      "coin_reward": 1572,
-      "xp_reward": 1048,
+      "objective": "HitMonsters",
+      "target": 50,
+      "progress": 0,
+      "coin_reward": 1250,
+      "xp_reward": 833,
       "completed": false,
       "cooldown_ends_at": null
     }

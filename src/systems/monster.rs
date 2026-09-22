@@ -23,6 +23,17 @@ use std::collections::HashMap;
 
 pub struct MonsterPlugin;
 
+/// Local-space Y offset of a monster's sprite child relative to its root
+/// entity (which physics/collision/the light child/YSort all stay anchored
+/// to) — the same value both kinds' spawn bundles use in `spawn_monster_at`.
+/// Named so Monster 2's attack-leap arc (`monster_ai`'s airborne handling)
+/// can compute `MONSTER_SPRITE_BASE_Y + arc_offset` instead of duplicating
+/// the magic number, and so it's obvious *only* the sprite child's own
+/// transform ever changes for the arc — never the root's, which is what
+/// keeps the leap's shadow/occlusion correctly grounded (see
+/// `docs/monster2.md`).
+const MONSTER_SPRITE_BASE_Y: f32 = 37.5;
+
 /// Which monster identity a spawned monster is — see `docs/monster2.md`.
 /// `Monster1` is the original monster (no marker component beyond the
 /// generic `Monster`); `Monster2` additionally gets the `Monster2` marker
@@ -71,6 +82,36 @@ pub struct Monster2Config {
     /// each getting their own cap, which is the simplest way to fold a
     /// second monster into the existing spawner without a parallel system.
     pub spawn_chance: f32,
+    /// How much faster than normal ground `MonsterCombatConfig::move_speed`
+    /// Monster 2 travels while airborne during its attack leap (e.g. `3.0`
+    /// = 3x). Applies only for the leap's duration — grounded/wandering
+    /// speed is completely unaffected, see `docs/monster2.md`.
+    pub jump_speed_multiplier: f32,
+    /// How long the attack leap's airborne (movement-boosted) phase lasts,
+    /// in seconds, before Monster 2 lands. Independent of the attack
+    /// animation's own length — see `docs/monster2.md` for how the two
+    /// relate.
+    pub jump_duration_secs: f32,
+    /// Purely visual: how high (world units) the sprite arcs above its true
+    /// ground position at the peak of the leap. Applied only to the sprite
+    /// child's own local transform, never to the monster's actual
+    /// Transform/collider/light position — see `docs/monster2.md`'s
+    /// occlusion section for why that distinction matters.
+    pub jump_height: f32,
+    /// Max distance to the player at which Monster 2 commits to an attack
+    /// leap instead of continuing normal Chase pathfinding — Monster 2's
+    /// own (longer-range, pounce-sized) equivalent of
+    /// `MonsterCombatConfig::attack_range`, passed to `state::evaluate` in
+    /// its place for Monster 2.
+    pub attack_jump_distance: f32,
+    /// Seconds between attack leaps. Seeded into `MonsterAI::action_cooldown`
+    /// at spawn time (`spawn_monster_at`) for Monster 2, exactly the same
+    /// field/mechanism `MonsterCombatConfig::attack_cooldown_seconds` seeds
+    /// for Monster 1 — no separate cooldown system.
+    pub attack_cooldown_secs: f32,
+    /// Damage dealt on a successful bite — Monster 2's own equivalent of
+    /// `MonsterCombatConfig::attack_damage`.
+    pub attack_damage: f32,
 }
 
 #[derive(Resource)]
@@ -221,14 +262,20 @@ impl Plugin for MonsterPlugin {
             kill_xp_min: 15,
             kill_xp_max: 30,
         })
-        // Monster 2's test-only HP/XP/spawn-mix numbers — see
-        // `Monster2Config`'s doc comment. All 4 values are placeholders,
+        // Monster 2's test-only HP/XP/spawn-mix/attack-leap numbers — see
+        // `Monster2Config`'s doc comment. All values are placeholders,
         // deliberately easy to find here and change later.
         .insert_resource(Monster2Config {
             test_hp: 60.0,
             test_xp_min: 15,
             test_xp_max: 30,
             spawn_chance: 0.25,
+            jump_speed_multiplier: 3.0,
+            jump_duration_secs: 0.45,
+            jump_height: 40.0,
+            attack_jump_distance: 4.0 * TILE_SIZE,
+            attack_cooldown_secs: 3.0,
+            attack_damage: 15.0,
         })
         .insert_resource(MonsterHiveMind::default())
         .insert_resource(PlayerEscapeModel::default())
@@ -412,6 +459,7 @@ fn spawn_monsters_system(
             kind_layout,
             &atlas_handles,
             &combat_config,
+            &monster2_config,
             kind,
             sense_config(difficulty.0).reaction_time,
             pos,
@@ -490,6 +538,7 @@ pub fn spawn_monster_at(
     texture_atlas_layout: Handle<TextureAtlasLayout>,
     atlas_handles: &AtlasHandles,
     combat_config: &MonsterCombatConfig,
+    monster2_config: &Monster2Config,
     kind: MonsterKind,
     reaction_time: f32,
     pos: Vec2,
@@ -500,15 +549,19 @@ pub fn spawn_monster_at(
         .get(kind.walk_animation_key())
         .unwrap()
         .clone();
+    // Monster 2's attack cooldown is its own configured value, seeded into
+    // the same `action_cooldown` field/mechanism Monster 1's attack
+    // cooldown already uses — see `Monster2Config::attack_cooldown_secs`.
+    let action_cooldown_secs = match kind {
+        MonsterKind::Monster1 => combat_config.attack_cooldown_seconds,
+        MonsterKind::Monster2 => monster2_config.attack_cooldown_secs,
+    };
     let mut entity_commands = commands.spawn((
         Monster,
         MonsterAI {
             random_timer: Timer::from_seconds(2.0, TimerMode::Repeating),
             random_dir: Vec2::ZERO,
-            action_cooldown: Timer::from_seconds(
-                combat_config.attack_cooldown_seconds,
-                TimerMode::Once,
-            ),
+            action_cooldown: Timer::from_seconds(action_cooldown_secs, TimerMode::Once),
             health,
             last_health: health,
             stun_cooldown: Timer::from_seconds(0.375, TimerMode::Once),
@@ -518,43 +571,45 @@ pub fn spawn_monster_at(
         Pending,
         Mesh2d(meshes.add(Rectangle::new(40.0, 42.5))),
         Transform::from_xyz(pos.x, pos.y, -32.0),
-        children![
-            (
-                Sprite::from_atlas_image(
-                    texture.clone(),
-                    bevy::prelude::TextureAtlas {
-                        layout: texture_atlas_layout.clone(),
-                        index: monster_animation_indices.first,
-                    },
-                ),
-                YSort { z: 0.375 },
-                Transform::from_xyz(0.0, 37.5, 64.0).with_scale(Vec3::splat(2.0)),
-                RenderLayers::from_layers(CAMERA_LAYER_MONSTER),
-                monster_animation_indices,
-                AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
-                MonsterSprite,
-                AttackStatus(false),
-                FinishStatus(false),
-            ),
-            (
-                Transform::from_xyz(0.0, 15.0, 0.0),
-                PointLight2d {
-                    range: 375.0,
-                    intensity: 0.075,
-                    color: Color::srgba(1.0, 0.5, 0.0, 1.0),
-                    ..default()
-                },
-                YSort { z: 0.0 },
-            )
-        ],
     ));
-    if kind == MonsterKind::Monster2 {
-        entity_commands.insert((
-            Monster2,
-            Monster2Leap {
-                cooldown: Timer::from_seconds(4.5, TimerMode::Once),
-            },
+    // Built with `.with_children` (not the `children!` macro) so the sprite
+    // child's entity id is available to conditionally add `Monster2Sprite`
+    // — the marker `animate_monster_sprite` uses to know which sheet/atlas
+    // key to reset to when an attack/jump animation finishes.
+    entity_commands.with_children(|parent| {
+        let mut sprite_child = parent.spawn((
+            Sprite::from_atlas_image(
+                texture.clone(),
+                bevy::prelude::TextureAtlas {
+                    layout: texture_atlas_layout.clone(),
+                    index: monster_animation_indices.first,
+                },
+            ),
+            YSort { z: 0.375 },
+            Transform::from_xyz(0.0, MONSTER_SPRITE_BASE_Y, 64.0).with_scale(Vec3::splat(2.0)),
+            RenderLayers::from_layers(CAMERA_LAYER_MONSTER),
+            monster_animation_indices,
+            AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
+            MonsterSprite,
+            AttackStatus(false),
+            FinishStatus(false),
         ));
+        if kind == MonsterKind::Monster2 {
+            sprite_child.insert(Monster2Sprite);
+        }
+        parent.spawn((
+            Transform::from_xyz(0.0, 15.0, 0.0),
+            PointLight2d {
+                range: 375.0,
+                intensity: 0.075,
+                color: Color::srgba(1.0, 0.5, 0.0, 1.0),
+                ..default()
+            },
+            YSort { z: 0.0 },
+        ));
+    });
+    if kind == MonsterKind::Monster2 {
+        entity_commands.insert((Monster2, Monster2AttackJump::default()));
     }
 }
 
@@ -634,6 +689,16 @@ fn create_ai_texture(images: &mut Assets<Image>, width: u32, height: u32) -> Han
     }
 }*/
 
+// `Without<Monster>`/`Without<Player>` are required, not just
+// documentation: `monster_ai` also has `query` (root monster entities,
+// `With<Monster>`, writes `Transform`) and `player_query` (`With<Player>`,
+// reads `Transform`) as top-level params, and this one (sprite children,
+// `With<MonsterSprite>`) now writes `Transform` too. Two different `With<>`
+// filters alone don't let Bevy *prove* two queries can never match the same
+// entity — it has no way to know a bundle never puts `Monster`/`Player` and
+// `MonsterSprite` on the same entity — so without both of these it's a
+// genuine (and only caught at runtime, on the first `Update` tick) `B0001`
+// query-conflict panic, not just a style nit.
 type MonsterSpriteQuery<'w, 's> = Query<
     'w,
     's,
@@ -642,8 +707,10 @@ type MonsterSpriteQuery<'w, 's> = Query<
         &'static mut AttackStatus,
         &'static mut FinishStatus,
         &'static mut Sprite,
+        &'static mut Transform,
+        Option<&'static Monster2Sprite>,
     ),
-    With<MonsterSprite>,
+    (With<MonsterSprite>, Without<Monster>, Without<Player>),
 >;
 
 fn monster_ai(
@@ -658,7 +725,7 @@ fn monster_ai(
             Entity,
             &Children,
             Option<&Monster2>,
-            Option<&mut Monster2Leap>,
+            Option<&mut Monster2AttackJump>,
         ),
         (With<Monster>, Without<Player>, Without<Pending>),
     >,
@@ -847,19 +914,21 @@ fn monster_ai(
 
             // --- Perception: re-evaluate senses/state at a throttled interval
             // (not every frame — see MonsterSenseConfig::reaction_time). ---
-            // Monster 2 deliberately never runs `state::evaluate` — that's
-            // the one function that can ever move a monster out of `Idle`
-            // (into Chase/Investigate/Attack), so skipping it here is the
-            // entire "no player detection/aggro/chasing/attacking" behavior
-            // for Monster 2 — see `docs/monster2.md`'s AI section. It falls
-            // into the same branch as "no player exists yet" below, which
-            // already does exactly what a passive wanderer needs: force
-            // `Idle` and let the `MonsterState::Idle` match arm's existing
-            // wander/pathfinding-avoidance code (unchanged, shared with
-            // Monster 1) drive its movement.
+            // Monster 2 shares this detection/state machine with Monster 1
+            // unmodified — the only difference is the distance threshold
+            // `state::evaluate` uses to decide Chase -> Attack: Monster 2
+            // gets its own (longer, pounce-sized) `attack_jump_distance`
+            // instead of Monster 1's melee `attack_range`, since Monster 2's
+            // "attack" is a leap that needs a real gap to jump across. See
+            // `docs/monster2.md`'s AI section.
             perception.sense_timer.tick(time.delta());
             if has_player {
                 if perception.sense_timer.just_finished() {
+                    let attack_range = if is_monster2 {
+                        loot_assets.monster2.attack_jump_distance
+                    } else {
+                        combat_config.attack_range
+                    };
                     state::evaluate(
                         &mut perception,
                         &terrain_map,
@@ -867,7 +936,7 @@ fn monster_ai(
                         player_pos,
                         &sense_inputs.noise,
                         &sense_cfg,
-                        combat_config.attack_range,
+                        attack_range,
                         now,
                         entity,
                         &monster_snapshot,
@@ -1018,120 +1087,205 @@ fn monster_ai(
 
             let mut velocity = Vec2::ZERO;
 
-            match perception.state {
-                MonsterState::Attack => {
-                    // The whole point of the CHASE/ATTACK split: stop issuing
-                    // movement toward the player and let the animation
-                    // lifecycle below own the hit, instead of shoving into them.
-                    perception.facing = (player_pos - monster_pos).normalize_or_zero();
+            // Monster 2's attack leap takes full, uninterruptible priority
+            // over `perception.state` while airborne. `state::evaluate` may
+            // keep reassigning `perception.state` underneath it every
+            // `reaction_time` tick (e.g. once the player is out of
+            // `attack_jump_distance` again) — but this `airborne` check runs
+            // *before* the state match below and skips it entirely while
+            // true, so nothing (pathfinding, wandering, obstacle-avoidance
+            // steering, or a state change) can redirect the leap mid-air.
+            // `leap.direction` was captured once at takeoff (see the
+            // `MonsterState::Attack` arm below) and is only ever read back
+            // here, never recalculated from the player's current position —
+            // see `docs/monster2.md`.
+            let airborne = is_monster2 && leap.as_deref().is_some_and(|l| l.airborne);
+            if airborne {
+                let leap = leap.as_deref_mut().expect("airborne implies Some(leap)");
+                leap.elapsed += time.delta_secs();
+                let boosted_speed =
+                    combat_config.move_speed * loot_assets.monster2.jump_speed_multiplier;
+                velocity = leap.direction * boosted_speed;
+                perception.facing = leap.direction;
 
-                    if let Ok((mut child_indices, mut attack, mut finish, mut sprite)) =
-                        child_query.get_mut(children[0])
-                    {
-                        if !attack.0 && !finish.0 && ai.action_cooldown.is_finished() {
-                            attack.0 = true;
-                            ai.action_cooldown.reset();
-                            let animation_indices = atlas_handles
-                                .0
-                                .get(if is_monster2 { "attack2" } else { "attack" })
-                                .unwrap()
-                                .clone();
-                            if let Some(atlas) = &mut sprite.texture_atlas {
-                                atlas.index = animation_indices.first;
-                                if is_monster2 {
-                                    atlas.layout = loot_assets.monster2_layouts.attack.clone();
-                                }
-                            }
-                            *child_indices = animation_indices;
-                        }
-                        if finish.0 {
-                            finish.0 = false;
-                            ai.action_cooldown.reset();
-                            if is_monster2 {
-                                if let Some(atlas) = &mut sprite.texture_atlas {
-                                    atlas.layout = loot_assets.monster2_layouts.walk.clone();
-                                    atlas.index = atlas_handles.0.get("walk2").unwrap().first;
-                                }
-                                *child_indices = atlas_handles.0.get("walk2").unwrap().clone();
-                            }
-                            // Hit frame: only land the hit if the player is
-                            // still actually in range right now, not just
-                            // when the swing started.
-                            if let Some(ref mut player_data) = player_data_some {
-                                if monster_pos.distance(player_pos) <= combat_config.attack_range {
-                                    player_data.damage(combat_config.attack_damage);
-                                    player_data.can_heal.reset();
-                                }
-                            }
-                        }
-                    }
+                // Purely visual arc — rises to `jump_height` at the
+                // leap's midpoint and back to 0 by landing. Applied only
+                // to the sprite child's own local transform, *never* to
+                // `rb_transform` (the monster's actual ground position,
+                // which physics, the light child, and occlusion/shadows
+                // all stay anchored to) — see `docs/monster2.md`'s
+                // occlusion section for why that split is the actual fix,
+                // not a workaround.
+                let duration = loot_assets.monster2.jump_duration_secs.max(0.0001);
+                let t = (leap.elapsed / duration).clamp(0.0, 1.0);
+                let arc = 4.0 * loot_assets.monster2.jump_height * t * (1.0 - t);
+                if let Ok((_, _, _, _, mut sprite_transform, _)) = child_query.get_mut(children[0])
+                {
+                    sprite_transform.translation.y = MONSTER_SPRITE_BASE_Y + arc;
                 }
-                MonsterState::Idle => {
-                    clear_attack_visuals(&mut child_query, children);
-                    perception.path.clear();
-                    perception.path_index = 0;
 
-                    ai.random_timer.tick(time.delta());
-                    if ai.random_timer.just_finished() {
-                        ai.random_dir = pick_wander_direction(
-                            &terrain_map,
-                            monster_pos,
-                            config.collider_half_extent,
-                            combat_config.wander_lookahead,
-                        );
-                    }
-                    velocity = ai.random_dir * move_speed;
-                    if ai.random_dir.length_squared() > 0.0001 {
-                        perception.facing = ai.random_dir;
-                    } else {
-                        // Every wander direction was blocked within
-                        // lookahead range (e.g. boxed into a corner) — keep
-                        // slowly turning to scan around instead of freezing
-                        // facing one fixed way until the next wander retry
-                        // (up to `random_timer`'s full 2s), which could
-                        // otherwise leave the player standing right behind
-                        // it undetected the whole time.
-                        const IDLE_SCAN_RADIANS_PER_SEC: f32 = 1.2;
-                        let rotation =
-                            Vec2::from_angle(IDLE_SCAN_RADIANS_PER_SEC * time.delta_secs());
-                        perception.facing = rotation.rotate(perception.facing);
-                    }
+                if leap.elapsed >= duration {
+                    leap.airborne = false;
                 }
-                MonsterState::Chase | MonsterState::Investigate => {
-                    clear_attack_visuals(&mut child_query, children);
+            } else {
+                match perception.state {
+                    MonsterState::Attack => {
+                        // Shared with Monster 1: face the player while
+                        // grounded and waiting on cooldown. The instant
+                        // Monster 2's leap actually takes off this gets
+                        // overwritten with the locked direction below
+                        // (same frame) — and once airborne, this whole arm
+                        // stops running at all (see the bypass above), so
+                        // it can never re-aim mid-leap.
+                        perception.facing = (player_pos - monster_pos).normalize_or_zero();
 
-                    // Monster 2 occasionally uses its jump sheet to close a
-                    // medium-sized gap. The cooldown and distance window keep
-                    // it readable and prevent a permanent dash state.
-                    if is_monster2 {
-                        if let Some(leap) = leap.as_deref_mut() {
-                            leap.cooldown.tick(time.delta());
-                            let can_leap = perception.state == MonsterState::Chase
-                                && distance > 1.75 * TILE_SIZE
-                                && distance < 5.5 * TILE_SIZE
-                                && leap.cooldown.is_finished();
-                            if can_leap {
-                                let direction = (player_pos - monster_pos).normalize_or_zero();
-                                velocity = direction * combat_config.move_speed * 5.0;
-                                perception.facing = direction;
-                                leap.cooldown.reset();
-                                if let Ok((mut child_indices, mut attack, _, mut sprite)) =
-                                    child_query.get_mut(children[0])
-                                {
-                                    let jump = atlas_handles.0.get("jump2").unwrap().clone();
-                                    *child_indices = jump.clone();
+                        if is_monster2 {
+                            // Monster 2's "attack" is a leap — the actual
+                            // movement/arc happens in the airborne branch
+                            // above; this is only ever reached grounded, so
+                            // it's exclusively takeoff (lock direction,
+                            // start the leap + attack2 animation) and the
+                            // bite/landing (damage + reset to walk2). Bite
+                            // timing stays driven by `finish.0`, set by
+                            // `animate_monster_sprite`'s own frame-timer —
+                            // independent of (and not required to exactly
+                            // match) `jump_duration_secs`, which only
+                            // governs movement — see `docs/monster2.md`.
+                            if let Some(leap) = leap.as_deref_mut()
+                                && let Ok((
+                                    mut child_indices,
+                                    mut attack,
+                                    mut finish,
+                                    mut sprite,
+                                    mut sprite_transform,
+                                    _,
+                                )) = child_query.get_mut(children[0])
+                            {
+                                if !attack.0 && !finish.0 && ai.action_cooldown.is_finished() {
+                                    // TAKEOFF: direction calculated once,
+                                    // right here, and locked into
+                                    // `leap.direction` — every frame of the
+                                    // airborne branch above reads it back
+                                    // rather than recalculating it from the
+                                    // player's (possibly since moved)
+                                    // position.
+                                    let direction = (player_pos - monster_pos).normalize_or_zero();
+                                    leap.direction = direction;
+                                    leap.airborne = true;
+                                    leap.elapsed = 0.0;
+                                    perception.facing = direction;
+                                    velocity = direction
+                                        * combat_config.move_speed
+                                        * loot_assets.monster2.jump_speed_multiplier;
+
                                     attack.0 = true;
+                                    ai.action_cooldown.reset();
+                                    let animation_indices =
+                                        atlas_handles.0.get("attack2").unwrap().clone();
                                     if let Some(atlas) = &mut sprite.texture_atlas {
-                                        atlas.layout = loot_assets.monster2_layouts.jump.clone();
-                                        atlas.index = jump.first;
+                                        atlas.layout = loot_assets.monster2_layouts.attack.clone();
+                                        atlas.index = animation_indices.first;
+                                    }
+                                    *child_indices = animation_indices;
+                                }
+                                if finish.0 {
+                                    finish.0 = false;
+                                    ai.action_cooldown.reset();
+                                    leap.airborne = false;
+                                    // In case the bite animation finished
+                                    // before `jump_duration_secs` elapsed —
+                                    // don't leave the sprite's visual arc
+                                    // offset lingering above ground.
+                                    sprite_transform.translation.y = MONSTER_SPRITE_BASE_Y;
+                                    if let Some(atlas) = &mut sprite.texture_atlas {
+                                        atlas.layout = loot_assets.monster2_layouts.walk.clone();
+                                        atlas.index = atlas_handles.0.get("walk2").unwrap().first;
+                                    }
+                                    *child_indices = atlas_handles.0.get("walk2").unwrap().clone();
+                                    // Hit frame: only land the hit if the
+                                    // player is still actually in range
+                                    // right now, not just when the leap
+                                    // started.
+                                    if let Some(ref mut player_data) = player_data_some
+                                        && monster_pos.distance(player_pos)
+                                            <= combat_config.attack_range
+                                    {
+                                        player_data.damage(loot_assets.monster2.attack_damage);
+                                        player_data.can_heal.reset();
+                                    }
+                                }
+                            }
+                        } else if let Ok((
+                            mut child_indices,
+                            mut attack,
+                            mut finish,
+                            mut sprite,
+                            _,
+                            _,
+                        )) = child_query.get_mut(children[0])
+                        {
+                            if !attack.0 && !finish.0 && ai.action_cooldown.is_finished() {
+                                attack.0 = true;
+                                ai.action_cooldown.reset();
+                                let animation_indices =
+                                    atlas_handles.0.get("attack").unwrap().clone();
+                                if let Some(atlas) = &mut sprite.texture_atlas {
+                                    atlas.index = animation_indices.first;
+                                }
+                                *child_indices = animation_indices;
+                            }
+                            if finish.0 {
+                                finish.0 = false;
+                                ai.action_cooldown.reset();
+                                // Hit frame: only land the hit if the player is
+                                // still actually in range right now, not just
+                                // when the swing started.
+                                if let Some(ref mut player_data) = player_data_some {
+                                    if monster_pos.distance(player_pos)
+                                        <= combat_config.attack_range
+                                    {
+                                        player_data.damage(combat_config.attack_damage);
+                                        player_data.can_heal.reset();
                                     }
                                 }
                             }
                         }
                     }
+                    MonsterState::Idle => {
+                        clear_attack_visuals(&mut child_query, children);
+                        perception.path.clear();
+                        perception.path_index = 0;
 
-                    if velocity == Vec2::ZERO
-                        && let Some(target) = nav_target_for(
+                        ai.random_timer.tick(time.delta());
+                        if ai.random_timer.just_finished() {
+                            ai.random_dir = pick_wander_direction(
+                                &terrain_map,
+                                monster_pos,
+                                config.collider_half_extent,
+                                combat_config.wander_lookahead,
+                            );
+                        }
+                        velocity = ai.random_dir * move_speed;
+                        if ai.random_dir.length_squared() > 0.0001 {
+                            perception.facing = ai.random_dir;
+                        } else {
+                            // Every wander direction was blocked within
+                            // lookahead range (e.g. boxed into a corner) — keep
+                            // slowly turning to scan around instead of freezing
+                            // facing one fixed way until the next wander retry
+                            // (up to `random_timer`'s full 2s), which could
+                            // otherwise leave the player standing right behind
+                            // it undetected the whole time.
+                            const IDLE_SCAN_RADIANS_PER_SEC: f32 = 1.2;
+                            let rotation =
+                                Vec2::from_angle(IDLE_SCAN_RADIANS_PER_SEC * time.delta_secs());
+                            perception.facing = rotation.rotate(perception.facing);
+                        }
+                    }
+                    MonsterState::Chase | MonsterState::Investigate => {
+                        clear_attack_visuals(&mut child_query, children);
+
+                        if let Some(target) = nav_target_for(
                             &mut perception,
                             &sense_cfg,
                             monster_pos,
@@ -1141,23 +1295,23 @@ fn monster_ai(
                             &investigate_claims,
                             combat_config.investigate_claim_radius,
                             now,
-                        )
-                    {
-                        velocity = seek_along_path(
-                            &mut perception,
-                            &terrain_map,
-                            monster_pos,
-                            target,
-                            &time,
-                            &config,
-                            &combat_config,
-                            move_speed,
-                            entity,
-                            &monster_snapshot,
-                            &path_claims,
-                        );
-                        if velocity.length_squared() > 0.0001 {
-                            perception.facing = velocity.normalize();
+                        ) {
+                            velocity = seek_along_path(
+                                &mut perception,
+                                &terrain_map,
+                                monster_pos,
+                                target,
+                                &time,
+                                &config,
+                                &combat_config,
+                                move_speed,
+                                entity,
+                                &monster_snapshot,
+                                &path_claims,
+                            );
+                            if velocity.length_squared() > 0.0001 {
+                                perception.facing = velocity.normalize();
+                            }
                         }
                     }
                 }
@@ -1167,8 +1321,13 @@ fn monster_ai(
             // reasons about walls, so two monsters can still independently
             // compute paths that send them through the same tight gap at the
             // same time. Not while attacking (that velocity is already zero
-            // and shouldn't be perturbed mid-swing).
-            if perception.state != MonsterState::Attack {
+            // and shouldn't be perturbed mid-swing) — and not while a
+            // Monster 2 attack leap is airborne, regardless of what
+            // `perception.state` currently says (it isn't necessarily still
+            // `Attack` — see the airborne bypass above): separation/yield
+            // steering from nearby monsters must not redirect a locked-in
+            // leap either.
+            if perception.state != MonsterState::Attack && !airborne {
                 velocity = resolve_monster_collisions(
                     entity,
                     monster_pos,
@@ -1216,7 +1375,7 @@ fn monster_ai(
 /// mid-swing, so leaving Attack state doesn't strand the sprite on a stale
 /// "finish" flag from a previous encounter.
 fn clear_attack_visuals(child_query: &mut MonsterSpriteQuery, children: &Children) {
-    if let Ok((_, attack, mut finish, _)) = child_query.get_mut(children[0]) {
+    if let Ok((_, attack, mut finish, _, _, _)) = child_query.get_mut(children[0]) {
         if !attack.0 {
             finish.0 = false;
         }
@@ -1608,6 +1767,7 @@ fn rand_dir() -> f32 {
 fn animate_monster_sprite(
     time: Res<Time>,
     atlas_handles: Res<AtlasHandles>,
+    monster2_layouts: Res<crate::systems::loader::Monster2AnimationLayouts>,
     mut query: Query<
         (
             &mut AnimationIndices,
@@ -1615,11 +1775,13 @@ fn animate_monster_sprite(
             &mut Sprite,
             &mut AttackStatus,
             &mut FinishStatus,
+            Option<&Monster2Sprite>,
         ),
         With<MonsterSprite>,
     >,
 ) {
-    for (mut indices, mut timer, mut sprite, mut attack, mut finish) in &mut query {
+    for (mut indices, mut timer, mut sprite, mut attack, mut finish, monster2_sprite) in &mut query
+    {
         timer.0.tick(time.delta());
         if timer.0.just_finished() {
             if let Some(atlas) = &mut sprite.texture_atlas {
@@ -1634,8 +1796,24 @@ fn animate_monster_sprite(
                     if attack.0 {
                         attack.0 = false;
                         finish.0 = true;
-                        let animation_indices = atlas_handles.0.get("walk").unwrap().clone();
+                        // Kind-aware: an attack/jump animation finishing on
+                        // a Monster 2 must reset to its own "walk2" sheet
+                        // (both the atlas index range *and* the
+                        // `TextureAtlasLayout` handle) — resetting only the
+                        // index while leaving Monster 1's "walk" indices
+                        // paired with Monster 2's still-active attack/jump
+                        // layout would slice the wrong region of
+                        // `monster2_combined.png` for one frame.
+                        let walk_key = if monster2_sprite.is_some() {
+                            "walk2"
+                        } else {
+                            "walk"
+                        };
+                        let animation_indices = atlas_handles.0.get(walk_key).unwrap().clone();
                         if let Some(atlas) = &mut sprite.texture_atlas {
+                            if monster2_sprite.is_some() {
+                                atlas.layout = monster2_layouts.walk.clone();
+                            }
                             atlas.index = animation_indices.first;
                         }
                         *indices = animation_indices;

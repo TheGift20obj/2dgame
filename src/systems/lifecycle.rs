@@ -1,6 +1,7 @@
 use crate::resourses::physics_resources::*;
 use crate::systems::monster::{
-    MonsterCombatConfig, MonsterKind, load_monster_texture, load_monster2_texture, spawn_monster_at,
+    Monster2Config, MonsterCombatConfig, MonsterKind, load_monster_texture, load_monster2_texture,
+    spawn_monster_at,
 };
 use crate::systems::monster_ai::difficulty::{ActiveDifficulty, sense_config};
 use crate::systems::monster_ai::hivemind::PlayerEscapeModel;
@@ -109,6 +110,7 @@ fn handle_play_requested(
     config: Res<ItemConfig>,
     atlas_handles: Res<AtlasHandles>,
     combat_config: Res<MonsterCombatConfig>,
+    monster2_config: Res<Monster2Config>,
     quest_config: Res<QuestConfig>,
     mut flags: PlaySessionFlags,
 ) {
@@ -190,6 +192,7 @@ fn handle_play_requested(
                     kind_layout,
                     &atlas_handles,
                     &combat_config,
+                    &monster2_config,
                     monster.kind,
                     reaction_time,
                     Vec2::new(monster.position.0, monster.position.1),

@@ -1,12 +1,12 @@
 {
-  "health": 100.0,
+  "health": 85.0,
   "max_health": 100.0,
-  "satamina": 327.125,
+  "satamina": 275.625,
   "min_satamina": 25.0,
   "max_satamina": 360.0,
   "position": [
-    120.7172,
-    1335.1754
+    3021.5461,
+    4450.148
   ],
   "inventory": {
     "0": {
@@ -27,96 +27,72 @@
         25.0
       ],
       "item_type": "food",
-      "amount": 5
+      "amount": 3
     }
   },
-  "difficulty": "Hard",
+  "difficulty": "Normal",
   "monsters": [
     {
       "position": [
-        268.51,
-        1719.7046
+        1550.166,
+        5676.547
+      ],
+      "health": 60.0,
+      "kind": "Monster2"
+    },
+    {
+      "position": [
+        2389.459,
+        3349.4219
       ],
       "health": 100.0,
       "kind": "Monster1"
     },
     {
       "position": [
-        445.33737,
-        1306.0939
-      ],
-      "health": 100.0,
-      "kind": "Monster1"
-    },
-    {
-      "position": [
-        -637.033,
-        1314.2424
-      ],
-      "health": 100.0,
-      "kind": "Monster1"
-    },
-    {
-      "position": [
-        427.0352,
-        1348.4323
-      ],
-      "health": 100.0,
-      "kind": "Monster1"
-    },
-    {
-      "position": [
-        -257.27008,
-        2017.2715
-      ],
-      "health": 100.0,
-      "kind": "Monster1"
-    },
-    {
-      "position": [
-        135.97325,
-        1819.258
+        4098.049,
+        5252.109
       ],
       "health": 100.0,
       "kind": "Monster1"
     }
   ],
   "pack_escape_dir": [
-    -0.80820125,
-    0.5889064
+    0.0,
+    0.0
   ],
-  "pack_escape_samples": 2713,
-  "coins": 584,
+  "pack_escape_samples": 0,
+  "coins": 542,
   "level": 3,
-  "xp": 78,
+  "xp": 84,
   "quests": [
     {
       "difficulty": "Easy",
-      "objective": "ConsumeFood",
-      "target": 3,
-      "progress": 0,
-      "coin_reward": 100,
-      "xp_reward": 30,
+      "objective": "CollectItems",
+      "target": 6,
+      "progress": 4,
+      "coin_reward": 150,
+      "xp_reward": 45,
       "completed": false,
       "cooldown_ends_at": null
     },
     {
       "difficulty": "Medium",
-      "objective": "HitMonsters",
-      "target": 21,
-      "progress": 20,
-      "coin_reward": 420,
-      "xp_reward": 210,
-      "completed": false,
-      "cooldown_ends_at": null
+      "objective": "ConsumeApples",
+      "target": 13,
+      "progress": 13,
+      "coin_reward": 542,
+      "xp_reward": 271,
+      "completed": true,
+      "cooldown_ends_at": 1790118774
     },
     {
       "difficulty": "Hard",
       "objective": "HitMonsters",
-      "target": 57,
-      "progress": 55,
-      "coin_reward": 1425,
-      "xp_reward": 950,
+      "target": 67,
+      "progress": 16,
+      "coin_reward": 1675,
+      "xp_reward": 1117,
       "completed": false,
       "cooldown_ends_at": null
     }

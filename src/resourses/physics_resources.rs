@@ -117,16 +117,38 @@ pub struct Monster;
 #[derive(Component)]
 pub struct Monster2;
 
-/// State local to Monster 2's periodic leap. The timer makes a leap an
-/// occasional gap-closing move instead of permanent high-speed chasing.
-#[derive(Component)]
-pub struct Monster2Leap {
-    pub cooldown: Timer,
+/// Tracks Monster 2's attack-leap lifecycle — see `docs/monster2.md`. The
+/// cooldown between leaps reuses `MonsterAI::action_cooldown` (seeded from
+/// `monster::Monster2Config::attack_cooldown_secs` at spawn, same mechanism
+/// Monster 1's attack cooldown already uses), so this only tracks what's
+/// actually specific to being airborne.
+///
+/// `direction` is captured once at takeoff (`monster::monster_ai`'s
+/// `MonsterState::Attack` handling for Monster 2) and never recalculated
+/// for the rest of that leap — every frame while `airborne` is true,
+/// `monster_ai` reads `direction` back out rather than re-deriving it from
+/// the player's current position, which is the entire mechanism behind
+/// "the jump direction is locked at takeoff and can't be steered mid-air".
+#[derive(Component, Default)]
+pub struct Monster2AttackJump {
+    pub airborne: bool,
+    pub direction: Vec2,
+    /// Seconds elapsed since takeoff — compared against
+    /// `Monster2Config::jump_duration_secs` to know when to land, and used
+    /// to compute the sprite-only visual arc height (see
+    /// `monster::MONSTER_SPRITE_BASE_Y`).
+    pub elapsed: f32,
 }
 
 #[derive(Component)]
 pub struct MonsterSprite;
 
+/// Marks specifically the sprite child of a Monster 2 entity (as opposed to
+/// Monster 1's, which only carries the generic `MonsterSprite`) — lets
+/// `monster::animate_monster_sprite` pick the correct `AtlasHandles` key
+/// ("walk2" vs "walk") and `Monster2AnimationLayouts` layout to reset to
+/// when an attack/jump animation finishes, instead of always assuming
+/// Monster 1's sheet.
 #[derive(Component)]
 pub struct Monster2Sprite;
 
