@@ -1,5 +1,7 @@
 use crate::resourses::physics_resources::*;
-use crate::systems::monster::{MonsterCombatConfig, load_monster_texture, spawn_monster_at};
+use crate::systems::monster::{
+    MonsterCombatConfig, MonsterKind, load_monster_texture, load_monster2_texture, spawn_monster_at,
+};
 use crate::systems::monster_ai::difficulty::{ActiveDifficulty, sense_config};
 use crate::systems::monster_ai::hivemind::PlayerEscapeModel;
 use crate::systems::physics::remove_rigid_body;
@@ -173,15 +175,22 @@ fn handle_play_requested(
         if !save.monsters.is_empty() {
             let (texture, texture_atlas_layout) =
                 load_monster_texture(&asset_server, &mut texture_atlas_layouts);
+            let (texture2, texture_atlas_layout2) =
+                load_monster2_texture(&asset_server, &mut texture_atlas_layouts);
             let reaction_time = sense_config(save.difficulty).reaction_time;
             for monster in &save.monsters {
+                let (kind_texture, kind_layout) = match monster.kind {
+                    MonsterKind::Monster1 => (texture.clone(), texture_atlas_layout.clone()),
+                    MonsterKind::Monster2 => (texture2.clone(), texture_atlas_layout2.clone()),
+                };
                 spawn_monster_at(
                     &mut commands,
                     &mut meshes,
-                    texture.clone(),
-                    texture_atlas_layout.clone(),
+                    kind_texture,
+                    kind_layout,
                     &atlas_handles,
                     &combat_config,
+                    monster.kind,
                     reaction_time,
                     Vec2::new(monster.position.0, monster.position.1),
                     monster.health,
@@ -376,7 +385,7 @@ fn handle_leave_requested(
         With<Player>,
     >,
     player_ui_query: Query<Entity, With<PlayerUIs>>,
-    monster_query: Query<(&Transform, &MonsterAI), With<Monster>>,
+    monster_query: Query<(&Transform, &MonsterAI, Option<&Monster2>), With<Monster>>,
     asset_server: Res<AssetServer>,
     mut pending_respawn: ResMut<PendingRespawn>,
     menu_assets: Res<crate::systems::menu_ui::MenuAssets>,
@@ -397,9 +406,14 @@ fn handle_leave_requested(
     // monsters were currently alive/hurt/chasing.
     let monsters: Vec<MonsterSaveData> = monster_query
         .iter()
-        .map(|(transform, ai)| MonsterSaveData {
+        .map(|(transform, ai, monster2)| MonsterSaveData {
             position: (transform.translation.x, transform.translation.y),
             health: ai.health,
+            kind: if monster2.is_some() {
+                MonsterKind::Monster2
+            } else {
+                MonsterKind::Monster1
+            },
         })
         .collect();
     let pack_escape_dir = (

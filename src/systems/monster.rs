@@ -17,9 +17,60 @@ use crate::systems::terrain::{self, TerrainMap};
 use bevy::camera::{ImageRenderTarget, RenderTarget};
 use bevy::ecs::system::SystemParam;
 use rand::Rng;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub struct MonsterPlugin;
+
+/// Which monster identity a spawned monster is — see `docs/monster2.md`.
+/// `Monster1` is the original monster (no marker component beyond the
+/// generic `Monster`); `Monster2` additionally gets the `Monster2` marker
+/// component so future gameplay code can target it specifically. Adding a
+/// Monster 3 later means adding one more variant here plus one more arm in
+/// each of this enum's methods — nothing else needs a parallel type.
+///
+/// `Serialize`/`Deserialize` because a monster's kind is persisted in
+/// `save::MonsterSaveData` — otherwise leaving with a Monster 2 nearby and
+/// rejoining would restore it as a Monster 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum MonsterKind {
+    #[default]
+    Monster1,
+    Monster2,
+}
+
+impl MonsterKind {
+    /// The `AtlasHandles` key (see `loader::init`) this kind's walk/idle
+    /// animation is registered under.
+    fn walk_animation_key(self) -> &'static str {
+        match self {
+            MonsterKind::Monster1 => "walk",
+            MonsterKind::Monster2 => "walk2",
+        }
+    }
+}
+
+/// Monster 2's test-only stats — deliberately kept separate from
+/// `MonsterCombatConfig` (Monster 1's tuned combat numbers) so a future
+/// developer has one obvious, small place to find and change Monster 2's
+/// placeholder HP/XP instead of hunting through Monster 1's config. See
+/// `docs/monster2.md`.
+#[derive(Resource)]
+pub struct Monster2Config {
+    /// HP a freshly spawned Monster 2 starts with.
+    pub test_hp: f32,
+    /// Random per-kill XP range granted for killing a Monster 2 — same
+    /// mechanism as `MonsterCombatConfig::kill_xp_min`/`kill_xp_max`, just a
+    /// separate range so Monster 2's reward can be tuned independently.
+    pub test_xp_min: u32,
+    pub test_xp_max: u32,
+    /// Chance (0.0..=1.0) that a given spawn slot in `spawn_monsters_system`
+    /// spawns a Monster 2 instead of a Monster 1 — the two kinds currently
+    /// share one population budget (see `population_config`) rather than
+    /// each getting their own cap, which is the simplest way to fold a
+    /// second monster into the existing spawner without a parallel system.
+    pub spawn_chance: f32,
+}
 
 #[derive(Resource)]
 struct MonsterSpawnTimer(Timer);
@@ -31,11 +82,15 @@ struct MonsterSpawnTimer(Timer);
 struct MonsterResetPending(bool);
 
 /// Keeps the already large monster AI system below Bevy's system-parameter
-/// limit while grouping the two resources needed to materialize loot.
+/// limit while grouping the resources needed at the moment a monster dies:
+/// loot materialization, plus Monster 2's test XP range (kill-time reward
+/// data, same as the loot config) so `monster_ai` doesn't need a 17th
+/// top-level parameter just for it.
 #[derive(SystemParam)]
 struct MonsterLootAssets<'w> {
     item_config: Res<'w, ItemConfig>,
     asset_server: Res<'w, AssetServer>,
+    monster2: Res<'w, Monster2Config>,
 }
 
 #[derive(SystemParam)]
@@ -164,6 +219,15 @@ impl Plugin for MonsterPlugin {
             kill_xp_min: 15,
             kill_xp_max: 30,
         })
+        // Monster 2's test-only HP/XP/spawn-mix numbers — see
+        // `Monster2Config`'s doc comment. All 4 values are placeholders,
+        // deliberately easy to find here and change later.
+        .insert_resource(Monster2Config {
+            test_hp: 60.0,
+            test_xp_min: 15,
+            test_xp_max: 30,
+            spawn_chance: 0.25,
+        })
         .insert_resource(MonsterHiveMind::default())
         .insert_resource(PlayerEscapeModel::default())
         .add_message::<MonsterKilledEvent>()
@@ -255,6 +319,7 @@ fn spawn_monsters_system(
     existing_monsters: Query<Entity, With<Monster>>,
     config: Res<MonsterConfig>,
     combat_config: Res<MonsterCombatConfig>,
+    monster2_config: Res<Monster2Config>,
     atlas_handles: Res<AtlasHandles>,
     difficulty: Res<ActiveDifficulty>,
     terrain_map: Res<TerrainMap>,
@@ -278,8 +343,14 @@ fn spawn_monsters_system(
         return;
     };
 
+    // Both kinds' textures are loaded every tick spawning happens — cheap:
+    // `asset_server.load` just returns/reuses a cached handle, it doesn't
+    // decode anything itself. Which one actually gets used per spawn slot
+    // is decided below by `monster2_config.spawn_chance`.
     let (texture, texture_atlas_layout) =
         load_monster_texture(&asset_server, &mut texture_atlas_layouts);
+    let (texture2, texture_atlas_layout2) =
+        load_monster2_texture(&asset_server, &mut texture_atlas_layouts);
 
     let spawn_distance = config.min_spawn_distance * config.tile_size;
     let to_spawn = max_monsters - current_count;
@@ -319,16 +390,30 @@ fn spawn_monsters_system(
             // rather than forcing a bad spawn.
             continue;
         };
+        let kind = if rand::random::<f32>() < monster2_config.spawn_chance {
+            MonsterKind::Monster2
+        } else {
+            MonsterKind::Monster1
+        };
+        let (kind_texture, kind_layout, health) = match kind {
+            MonsterKind::Monster1 => (texture.clone(), texture_atlas_layout.clone(), 100.0),
+            MonsterKind::Monster2 => (
+                texture2.clone(),
+                texture_atlas_layout2.clone(),
+                monster2_config.test_hp,
+            ),
+        };
         spawn_monster_at(
             &mut commands,
             &mut meshes,
-            texture.clone(),
-            texture_atlas_layout.clone(),
+            kind_texture,
+            kind_layout,
             &atlas_handles,
             &combat_config,
+            kind,
             sense_config(difficulty.0).reaction_time,
             pos,
-            100.0,
+            health,
         );
         /*if spawned == false {
             for root in menu_root_query.iter() {
@@ -367,12 +452,34 @@ pub fn load_monster_texture(
     (texture, texture_atlas_layouts.add(layout))
 }
 
-/// Spawns one monster at `pos` with the given `health` — the exact bundle
-/// `spawn_monsters_system` used to build inline, parameterized so
-/// `lifecycle::handle_play_requested` can reuse it verbatim to restore a
-/// loaded save's monsters (position + HP) instead of duplicating the bundle.
-/// A freshly-spawned wandering monster and a save-restored one only ever
-/// differ in where they start and how much health they have.
+/// Loads Monster 2's spritesheet + its atlas layout — mirrors
+/// `load_monster_texture`. The layout only covers `monster2_combined.png`'s
+/// top (walk) section: an 80x80, 4-column x 2-row grid exactly matching the
+/// original `monster2.png`'s dimensions (320x160) placed at the top of the
+/// combined image, giving the 8 frames registered as the `"walk2"`
+/// `AnimationIndices` in `loader::init`. The attack/jump sections below it
+/// use different cell sizes (see `docs/monster2.md`) and have no layout
+/// defined yet — add a second `TextureAtlasLayout::from_grid` with an
+/// `offset` when wiring those up.
+pub fn load_monster2_texture(
+    asset_server: &AssetServer,
+    texture_atlas_layouts: &mut Assets<TextureAtlasLayout>,
+) -> (Handle<Image>, Handle<TextureAtlasLayout>) {
+    let texture = asset_server.load("textures/monster2_combined.png");
+    let layout = TextureAtlasLayout::from_grid(bevy::prelude::UVec2::new(80, 80), 4, 2, None, None);
+    (texture, texture_atlas_layouts.add(layout))
+}
+
+/// Spawns one monster of the given `kind` at `pos` with the given
+/// `health` — the exact bundle `spawn_monsters_system` used to build
+/// inline, parameterized so `lifecycle::handle_play_requested` can reuse it
+/// verbatim to restore a loaded save's monsters (position + HP + kind)
+/// instead of duplicating the bundle. A freshly-spawned wandering monster
+/// and a save-restored one only ever differ in where they start and how
+/// much health they have; two different kinds only ever differ in their
+/// sprite/animation and the `Monster2` marker — everything else (physics,
+/// movement, collision, death handling) is identical, which is exactly why
+/// `kind` is just one more parameter here rather than a second function.
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_monster_at(
     commands: &mut Commands,
@@ -381,12 +488,17 @@ pub fn spawn_monster_at(
     texture_atlas_layout: Handle<TextureAtlasLayout>,
     atlas_handles: &AtlasHandles,
     combat_config: &MonsterCombatConfig,
+    kind: MonsterKind,
     reaction_time: f32,
     pos: Vec2,
     health: f32,
 ) {
-    let monster_animation_indices = atlas_handles.0.get("walk").unwrap().clone();
-    commands.spawn((
+    let monster_animation_indices = atlas_handles
+        .0
+        .get(kind.walk_animation_key())
+        .unwrap()
+        .clone();
+    let mut entity_commands = commands.spawn((
         Monster,
         MonsterAI {
             random_timer: Timer::from_seconds(2.0, TimerMode::Repeating),
@@ -434,6 +546,9 @@ pub fn spawn_monster_at(
             )
         ],
     ));
+    if kind == MonsterKind::Monster2 {
+        entity_commands.insert(Monster2);
+    }
 }
 
 fn create_ai_texture(images: &mut Assets<Image>, width: u32, height: u32) -> Handle<Image> {
@@ -535,6 +650,7 @@ fn monster_ai(
             &mut Transform,
             Entity,
             &Children,
+            Option<&Monster2>,
         ),
         (With<Monster>, Without<Player>, Without<Pending>),
     >,
@@ -594,7 +710,7 @@ fn monster_ai(
     let mut monster_snapshot: Vec<(Entity, Vec2)> = Vec::new();
     let mut investigate_claims: Vec<(Entity, Vec2)> = Vec::new();
     let mut path_claims: HashMap<IVec2, Entity> = HashMap::new();
-    for (_, perception, _, transform, entity, _) in query.iter() {
+    for (_, perception, _, transform, entity, _, _) in query.iter() {
         let pos = transform.translation.xy();
         monster_snapshot.push((entity, pos));
         if let Some(target) = perception.investigate_target {
@@ -610,7 +726,10 @@ fn monster_ai(
         }
     }
 
-    for (mut ai, mut perception, rb_handle, mut rb_transform, entity, children) in &mut query {
+    for (mut ai, mut perception, rb_handle, mut rb_transform, entity, children, monster2) in
+        &mut query
+    {
+        let is_monster2 = monster2.is_some();
         if let Some(rigid_body) = rigid_bodies.0.get_mut(rb_handle.0) {
             let monster_pos = Vec2::new(
                 rigid_body.position().translation.x,
@@ -647,10 +766,28 @@ fn monster_ai(
                 continue;
             }
             if ai.health <= 0.0 {
-                let xp_reward = rand::thread_rng()
-                    .gen_range(combat_config.kill_xp_min..=combat_config.kill_xp_max);
+                // Monster 2 uses its own separate, easy-to-find test XP
+                // range (`Monster2Config`) instead of Monster 1's tuned
+                // `MonsterCombatConfig` range — see `docs/monster2.md`. The
+                // death handling below (physics teardown, despawn) and the
+                // XP grant itself (`MonsterKilledEvent` -> `quests::progress
+                // ::track_kills` -> `PlayerLevel::add_xp`) are entirely
+                // shared, unmodified for both kinds.
+                let (xp_min, xp_max) = if is_monster2 {
+                    (
+                        loot_assets.monster2.test_xp_min,
+                        loot_assets.monster2.test_xp_max,
+                    )
+                } else {
+                    (combat_config.kill_xp_min, combat_config.kill_xp_max)
+                };
+                let xp_reward = rand::thread_rng().gen_range(xp_min..=xp_max);
                 killed.write(MonsterKilledEvent { xp_reward });
-                if let Some(apple) = loot_assets.item_config.items.get("apple_red") {
+                // Loot is Monster 1-specific flavor (its apple drop) — not
+                // part of Monster 2's basic test scope, see
+                // `docs/monster2.md` for where to add Monster 2 loot later.
+                if !is_monster2 && let Some(apple) = loot_assets.item_config.items.get("apple_red")
+                {
                     let apple_count = rand::thread_rng().gen_range(2..=4);
                     for index in 0..apple_count {
                         let mut dropped_apple = apple.clone();
@@ -694,8 +831,18 @@ fn monster_ai(
 
             // --- Perception: re-evaluate senses/state at a throttled interval
             // (not every frame — see MonsterSenseConfig::reaction_time). ---
+            // Monster 2 deliberately never runs `state::evaluate` — that's
+            // the one function that can ever move a monster out of `Idle`
+            // (into Chase/Investigate/Attack), so skipping it here is the
+            // entire "no player detection/aggro/chasing/attacking" behavior
+            // for Monster 2 — see `docs/monster2.md`'s AI section. It falls
+            // into the same branch as "no player exists yet" below, which
+            // already does exactly what a passive wanderer needs: force
+            // `Idle` and let the `MonsterState::Idle` match arm's existing
+            // wander/pathfinding-avoidance code (unchanged, shared with
+            // Monster 1) drive its movement.
             perception.sense_timer.tick(time.delta());
-            if has_player {
+            if has_player && !is_monster2 {
                 if perception.sense_timer.just_finished() {
                     state::evaluate(
                         &mut perception,

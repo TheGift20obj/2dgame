@@ -22,6 +22,13 @@ fn init(
     atlas_handles.0.insert("walk".to_string(), handle_0);
     let handle_1 = AnimationIndices { first: 4, last: 8 };
     atlas_handles.0.insert("attack".to_string(), handle_1);
+    // Monster 2's walk cycle — see `monster2_combined.png`'s top section
+    // (originally `monster2.png`, an 4x2 grid of 80x80 frames, 8 total).
+    // Only the walk cycle is registered here: Monster 2's "attack"/"jump"
+    // sections exist in the combined texture but have no wired-up animation
+    // key yet — see `docs/monster2.md` for how to add them.
+    let handle_2 = AnimationIndices { first: 0, last: 7 };
+    atlas_handles.0.insert("walk2".to_string(), handle_2);
 }
 
 fn inspect(

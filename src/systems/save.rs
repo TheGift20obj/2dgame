@@ -1,4 +1,5 @@
 use crate::resourses::physics_resources::*;
+use crate::systems::monster::MonsterKind;
 use crate::systems::monster_ai::difficulty::Difficulty;
 use crate::systems::quests::Task;
 use bevy::prelude::*;
@@ -37,6 +38,10 @@ pub struct PendingRespawn {
 pub struct MonsterSaveData {
     pub position: (f32, f32),
     pub health: f32,
+    /// Which monster kind this was — see `monster::MonsterKind`. Defaults
+    /// to `Monster1` for saves written before Monster 2 existed.
+    #[serde(default)]
+    pub kind: MonsterKind,
 }
 
 /// Everything a save slot persists. Terrain is not included: it's fully

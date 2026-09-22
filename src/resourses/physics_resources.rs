@@ -107,6 +107,16 @@ pub struct Pending;
 #[derive(Component)]
 pub struct Monster;
 
+/// Marks a `Monster` entity as specifically Monster 2 — see
+/// `monster::MonsterKind` and `docs/monster2.md`. Monster 2 entities still
+/// carry the generic `Monster` marker too (every system that treats
+/// monsters generically — spawning, despawning, collision, death/XP —
+/// keeps working unmodified), this is only for code that needs to single
+/// Monster 2 out (`Query<..., With<Monster2>>`), such as a future chase/
+/// attack system that should apply to Monster 2 without touching Monster 1.
+#[derive(Component)]
+pub struct Monster2;
+
 #[derive(Component)]
 pub struct MonsterSprite;
 

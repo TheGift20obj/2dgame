@@ -1,5 +1,6 @@
 use crate::resourses::physics_resources::*;
 use crate::systems::lifecycle::AppSet;
+use crate::systems::monster::MonsterKind;
 use crate::systems::monster_ai::difficulty::{ActiveDifficulty, Difficulty};
 use crate::systems::monster_ai::hivemind::PlayerEscapeModel;
 use crate::systems::save::{self, ActiveSlot, MonsterSaveData};
@@ -18,7 +19,16 @@ struct SaveContext<'w, 's> {
     coins: Res<'w, crate::systems::progression::Coins>,
     level: Res<'w, crate::systems::progression::PlayerLevel>,
     quests: Res<'w, crate::systems::quests::QuestBoard>,
-    monster_query: Query<'w, 's, (&'static Transform, &'static MonsterAI), With<Monster>>,
+    monster_query: Query<
+        'w,
+        's,
+        (
+            &'static Transform,
+            &'static MonsterAI,
+            Option<&'static Monster2>,
+        ),
+        With<Monster>,
+    >,
 }
 
 const NORMAL_BUTTON: Color = Color::srgb(0.15, 0.15, 0.15);
@@ -525,12 +535,17 @@ fn button_system(
                                     let monsters: Vec<MonsterSaveData> = save_ctx
                                         .monster_query
                                         .iter()
-                                        .map(|(transform, ai)| MonsterSaveData {
+                                        .map(|(transform, ai, monster2)| MonsterSaveData {
                                             position: (
                                                 transform.translation.x,
                                                 transform.translation.y,
                                             ),
                                             health: ai.health,
+                                            kind: if monster2.is_some() {
+                                                MonsterKind::Monster2
+                                            } else {
+                                                MonsterKind::Monster1
+                                            },
                                         })
                                         .collect();
                                     let pack_escape_dir = (

@@ -1,0 +1,90 @@
+{
+  "health": 100.0,
+  "max_health": 100.0,
+  "satamina": 360.0,
+  "min_satamina": 25.0,
+  "max_satamina": 360.0,
+  "position": [
+    0.0,
+    0.0
+  ],
+  "inventory": {
+    "0": {
+      "id": "sword_basic",
+      "path": "textures/items/sword_icon.png",
+      "value": [
+        10.0,
+        45.0
+      ],
+      "item_type": "weapon",
+      "amount": 0
+    }
+  },
+  "difficulty": "Normal",
+  "monsters": [
+    {
+      "position": [
+        -3240.234,
+        1589.2482
+      ],
+      "health": 20.0,
+      "kind": "Monster2"
+    },
+    {
+      "position": [
+        -3341.9136,
+        1749.4889
+      ],
+      "health": 60.0,
+      "kind": "Monster1"
+    },
+    {
+      "position": [
+        -2339.1326,
+        2733.9302
+      ],
+      "health": 100.0,
+      "kind": "Monster1"
+    }
+  ],
+  "pack_escape_dir": [
+    0.0,
+    0.0
+  ],
+  "pack_escape_samples": 0,
+  "coins": 83,
+  "level": 1,
+  "xp": 25,
+  "quests": [
+    {
+      "difficulty": "Easy",
+      "objective": "HitMonsters",
+      "target": 5,
+      "progress": 5,
+      "coin_reward": 83,
+      "xp_reward": 25,
+      "completed": true,
+      "cooldown_ends_at": 1790105606
+    },
+    {
+      "difficulty": "Medium",
+      "objective": "TravelDistance",
+      "target": 892,
+      "progress": 367,
+      "coin_reward": 446,
+      "xp_reward": 223,
+      "completed": false,
+      "cooldown_ends_at": null
+    },
+    {
+      "difficulty": "Hard",
+      "objective": "TravelDistance",
+      "target": 3144,
+      "progress": 367,
+      "coin_reward": 1572,
+      "xp_reward": 1048,
+      "completed": false,
+      "cooldown_ends_at": null
+    }
+  ]
+}

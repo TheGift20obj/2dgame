@@ -1,12 +1,12 @@
 {
-  "health": 40.0,
+  "health": 100.0,
   "max_health": 100.0,
-  "satamina": 141.375,
+  "satamina": 327.125,
   "min_satamina": 25.0,
   "max_satamina": 360.0,
   "position": [
-    199.00133,
-    1930.7518
+    120.7172,
+    1335.1754
   ],
   "inventory": {
     "0": {
@@ -34,65 +34,71 @@
   "monsters": [
     {
       "position": [
-        271.6241,
-        1722.261
+        268.51,
+        1719.7046
       ],
-      "health": 100.0
+      "health": 100.0,
+      "kind": "Monster1"
     },
     {
       "position": [
-        323.55856,
-        1887.7378
+        445.33737,
+        1306.0939
       ],
-      "health": 100.0
-    },
-    {
-      "position": [
-        1576.754,
-        2705.0059
-      ],
-      "health": 100.0
+      "health": 100.0,
+      "kind": "Monster1"
     },
     {
       "position": [
         -637.033,
         1314.2424
       ],
-      "health": 100.0
+      "health": 100.0,
+      "kind": "Monster1"
     },
     {
       "position": [
-        1483.4863,
-        1927.9581
+        427.0352,
+        1348.4323
       ],
-      "health": 100.0
+      "health": 100.0,
+      "kind": "Monster1"
     },
     {
       "position": [
-        -873.96857,
-        1634.91
+        -257.27008,
+        2017.2715
       ],
-      "health": 100.0
+      "health": 100.0,
+      "kind": "Monster1"
+    },
+    {
+      "position": [
+        135.97325,
+        1819.258
+      ],
+      "health": 100.0,
+      "kind": "Monster1"
     }
   ],
   "pack_escape_dir": [
-    0.2754778,
-    -0.9613075
+    -0.80820125,
+    0.5889064
   ],
-  "pack_escape_samples": 2516,
+  "pack_escape_samples": 2713,
   "coins": 584,
   "level": 3,
   "xp": 78,
   "quests": [
     {
       "difficulty": "Easy",
-      "objective": "KillMonsters",
-      "target": 5,
-      "progress": 5,
-      "coin_reward": 167,
-      "xp_reward": 50,
-      "completed": true,
-      "cooldown_ends_at": 1790100642
+      "objective": "ConsumeFood",
+      "target": 3,
+      "progress": 0,
+      "coin_reward": 100,
+      "xp_reward": 30,
+      "completed": false,
+      "cooldown_ends_at": null
     },
     {
       "difficulty": "Medium",
