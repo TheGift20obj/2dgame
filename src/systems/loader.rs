@@ -7,6 +7,13 @@ use rapier2d::prelude::*;
 
 pub struct ObjectsLoaderPlugin;
 
+#[derive(Resource)]
+pub struct Monster2AnimationLayouts {
+    pub walk: Handle<TextureAtlasLayout>,
+    pub attack: Handle<TextureAtlasLayout>,
+    pub jump: Handle<TextureAtlasLayout>,
+}
+
 impl Plugin for ObjectsLoaderPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, init).add_systems(Update, inspect);
@@ -29,6 +36,35 @@ fn init(
     // key yet — see `docs/monster2.md` for how to add them.
     let handle_2 = AnimationIndices { first: 0, last: 7 };
     atlas_handles.0.insert("walk2".to_string(), handle_2);
+    atlas_handles.0.insert(
+        "attack2".to_string(),
+        AnimationIndices { first: 0, last: 7 },
+    );
+    atlas_handles
+        .0
+        .insert("jump2".to_string(), AnimationIndices { first: 0, last: 7 });
+    let walk = texture_atlas_layouts.add(TextureAtlasLayout::from_grid(
+        UVec2::new(80, 80),
+        4,
+        2,
+        None,
+        None,
+    ));
+    let attack = texture_atlas_layouts.add(TextureAtlasLayout::from_grid(
+        UVec2::new(80, 90),
+        4,
+        2,
+        None,
+        Some(UVec2::new(0, 160)),
+    ));
+    let jump = texture_atlas_layouts.add(TextureAtlasLayout::from_grid(
+        UVec2::new(80, 80),
+        4,
+        2,
+        None,
+        Some(UVec2::new(0, 340)),
+    ));
+    commands.insert_resource(Monster2AnimationLayouts { walk, attack, jump });
 }
 
 fn inspect(

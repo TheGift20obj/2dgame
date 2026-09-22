@@ -117,8 +117,18 @@ pub struct Monster;
 #[derive(Component)]
 pub struct Monster2;
 
+/// State local to Monster 2's periodic leap. The timer makes a leap an
+/// occasional gap-closing move instead of permanent high-speed chasing.
+#[derive(Component)]
+pub struct Monster2Leap {
+    pub cooldown: Timer,
+}
+
 #[derive(Component)]
 pub struct MonsterSprite;
+
+#[derive(Component)]
+pub struct Monster2Sprite;
 
 #[derive(Debug, Deserialize, Resource)]
 pub struct ItemConfig {

@@ -3,6 +3,7 @@ use rapier2d::prelude::*;
 
 use crate::resourses::physics_resources::*;
 use crate::systems::items::spawn_world_item;
+use crate::systems::loader::Monster2AnimationLayouts;
 use crate::systems::monster_ai::difficulty::{
     ActiveDifficulty, MonsterSenseConfig, population_config, sense_config,
 };
@@ -91,6 +92,7 @@ struct MonsterLootAssets<'w> {
     item_config: Res<'w, ItemConfig>,
     asset_server: Res<'w, AssetServer>,
     monster2: Res<'w, Monster2Config>,
+    monster2_layouts: Res<'w, Monster2AnimationLayouts>,
 }
 
 #[derive(SystemParam)]
@@ -547,7 +549,12 @@ pub fn spawn_monster_at(
         ],
     ));
     if kind == MonsterKind::Monster2 {
-        entity_commands.insert(Monster2);
+        entity_commands.insert((
+            Monster2,
+            Monster2Leap {
+                cooldown: Timer::from_seconds(4.5, TimerMode::Once),
+            },
+        ));
     }
 }
 
@@ -651,6 +658,7 @@ fn monster_ai(
             Entity,
             &Children,
             Option<&Monster2>,
+            Option<&mut Monster2Leap>,
         ),
         (With<Monster>, Without<Player>, Without<Pending>),
     >,
@@ -710,7 +718,7 @@ fn monster_ai(
     let mut monster_snapshot: Vec<(Entity, Vec2)> = Vec::new();
     let mut investigate_claims: Vec<(Entity, Vec2)> = Vec::new();
     let mut path_claims: HashMap<IVec2, Entity> = HashMap::new();
-    for (_, perception, _, transform, entity, _, _) in query.iter() {
+    for (_, perception, _, transform, entity, _, _, _) in query.iter() {
         let pos = transform.translation.xy();
         monster_snapshot.push((entity, pos));
         if let Some(target) = perception.investigate_target {
@@ -726,8 +734,16 @@ fn monster_ai(
         }
     }
 
-    for (mut ai, mut perception, rb_handle, mut rb_transform, entity, children, monster2) in
-        &mut query
+    for (
+        mut ai,
+        mut perception,
+        rb_handle,
+        mut rb_transform,
+        entity,
+        children,
+        monster2,
+        mut leap,
+    ) in &mut query
     {
         let is_monster2 = monster2.is_some();
         if let Some(rigid_body) = rigid_bodies.0.get_mut(rb_handle.0) {
@@ -842,7 +858,7 @@ fn monster_ai(
             // wander/pathfinding-avoidance code (unchanged, shared with
             // Monster 1) drive its movement.
             perception.sense_timer.tick(time.delta());
-            if has_player && !is_monster2 {
+            if has_player {
                 if perception.sense_timer.just_finished() {
                     state::evaluate(
                         &mut perception,
@@ -1015,15 +1031,29 @@ fn monster_ai(
                         if !attack.0 && !finish.0 && ai.action_cooldown.is_finished() {
                             attack.0 = true;
                             ai.action_cooldown.reset();
-                            let animation_indices = atlas_handles.0.get("attack").unwrap().clone();
+                            let animation_indices = atlas_handles
+                                .0
+                                .get(if is_monster2 { "attack2" } else { "attack" })
+                                .unwrap()
+                                .clone();
                             if let Some(atlas) = &mut sprite.texture_atlas {
                                 atlas.index = animation_indices.first;
+                                if is_monster2 {
+                                    atlas.layout = loot_assets.monster2_layouts.attack.clone();
+                                }
                             }
                             *child_indices = animation_indices;
                         }
                         if finish.0 {
                             finish.0 = false;
                             ai.action_cooldown.reset();
+                            if is_monster2 {
+                                if let Some(atlas) = &mut sprite.texture_atlas {
+                                    atlas.layout = loot_assets.monster2_layouts.walk.clone();
+                                    atlas.index = atlas_handles.0.get("walk2").unwrap().first;
+                                }
+                                *child_indices = atlas_handles.0.get("walk2").unwrap().clone();
+                            }
                             // Hit frame: only land the hit if the player is
                             // still actually in range right now, not just
                             // when the swing started.
@@ -1070,17 +1100,49 @@ fn monster_ai(
                 MonsterState::Chase | MonsterState::Investigate => {
                     clear_attack_visuals(&mut child_query, children);
 
-                    if let Some(target) = nav_target_for(
-                        &mut perception,
-                        &sense_cfg,
-                        monster_pos,
-                        combat_config.waypoint_arrive_radius,
-                        escape_bias,
-                        entity,
-                        &investigate_claims,
-                        combat_config.investigate_claim_radius,
-                        now,
-                    ) {
+                    // Monster 2 occasionally uses its jump sheet to close a
+                    // medium-sized gap. The cooldown and distance window keep
+                    // it readable and prevent a permanent dash state.
+                    if is_monster2 {
+                        if let Some(leap) = leap.as_deref_mut() {
+                            leap.cooldown.tick(time.delta());
+                            let can_leap = perception.state == MonsterState::Chase
+                                && distance > 1.75 * TILE_SIZE
+                                && distance < 5.5 * TILE_SIZE
+                                && leap.cooldown.is_finished();
+                            if can_leap {
+                                let direction = (player_pos - monster_pos).normalize_or_zero();
+                                velocity = direction * combat_config.move_speed * 5.0;
+                                perception.facing = direction;
+                                leap.cooldown.reset();
+                                if let Ok((mut child_indices, mut attack, _, mut sprite)) =
+                                    child_query.get_mut(children[0])
+                                {
+                                    let jump = atlas_handles.0.get("jump2").unwrap().clone();
+                                    *child_indices = jump.clone();
+                                    attack.0 = true;
+                                    if let Some(atlas) = &mut sprite.texture_atlas {
+                                        atlas.layout = loot_assets.monster2_layouts.jump.clone();
+                                        atlas.index = jump.first;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if velocity == Vec2::ZERO
+                        && let Some(target) = nav_target_for(
+                            &mut perception,
+                            &sense_cfg,
+                            monster_pos,
+                            combat_config.waypoint_arrive_radius,
+                            escape_bias,
+                            entity,
+                            &investigate_claims,
+                            combat_config.investigate_claim_radius,
+                            now,
+                        )
+                    {
                         velocity = seek_along_path(
                             &mut perception,
                             &terrain_map,
