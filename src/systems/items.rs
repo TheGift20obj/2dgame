@@ -14,17 +14,19 @@ struct WorldItemSpritePending;
 
 impl Plugin for WorldItemsPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(WorldItemsState::default()).add_systems(
-            Update,
-            (
-                reset_world_items_on_leave,
-                pickup_nearest_item,
-                drop_selected_item,
-                scale_world_item_sprites,
-            )
-                .chain()
-                .in_set(crate::systems::lifecycle::AppSet::Gameplay),
-        );
+        app.insert_resource(WorldItemsState::default())
+            .add_message::<ItemCollectedEvent>()
+            .add_systems(
+                Update,
+                (
+                    reset_world_items_on_leave,
+                    pickup_nearest_item,
+                    drop_selected_item,
+                    scale_world_item_sprites,
+                )
+                    .chain()
+                    .in_set(crate::systems::lifecycle::AppSet::Gameplay),
+            );
     }
 }
 
@@ -70,6 +72,7 @@ fn pickup_nearest_item(
     mut player: Query<(&Transform, &mut PlayerData), (With<Player>, Without<Pending>)>,
     items: Query<(Entity, &Transform, &WorldItem)>,
     mut commands: Commands,
+    mut collected: MessageWriter<ItemCollectedEvent>,
 ) {
     if !keyboard.just_pressed(KeyCode::KeyF) {
         return;
@@ -87,8 +90,11 @@ fn pickup_nearest_item(
         .min_by(|left, right| left.1.total_cmp(&right.1));
 
     if let Some((entity, _, item)) = nearest {
+        let item_id = item.id.clone();
+        let amount = item.amount;
         if player_data.inventory.try_add_item(item) {
             commands.entity(entity).despawn();
+            collected.write(ItemCollectedEvent { item_id, amount });
         }
     }
 }

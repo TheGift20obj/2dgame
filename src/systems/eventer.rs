@@ -8,6 +8,10 @@ impl Plugin for EventerPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ConsumeEvent>()
             .add_message::<FunctionalEvent>()
+            // Gameplay-fact events, consumed by the quest system
+            // (`systems::quests::progress`) to drive task progress.
+            .add_message::<MonsterHitEvent>()
+            .add_message::<ItemConsumedEvent>()
             //.init_resource::<Messages<ConsumeEvent>>()
             //.init_resource::<Messages<FunctionalEvent>>()
             .add_systems(
@@ -27,6 +31,7 @@ fn food_eventer(
     mut query: Query<&mut PlayerData, With<Player>>,
     mut slots: Query<(&InventorySlot, &Children), With<InventorySlot>>,
     mut text_q: Query<&mut Text>,
+    mut consumed: MessageWriter<ItemConsumedEvent>,
 ) {
     for ev in events.read() {
         let Ok(mut pdata) = query.single_mut() else {
@@ -53,6 +58,10 @@ fn food_eventer(
             pdata.health = (pdata.health + item.value[0]).min(pdata.max_health);
             pdata.satamina = (pdata.satamina + item.value[1]).min(pdata.max_satamina);
             //println!("Gracz zjadł {}, +{} HP", ev.item_id, item.value);
+            consumed.write(ItemConsumedEvent {
+                item_id: ev.item_id.clone(),
+                item_type: item.item_type.clone(),
+            });
         }
     }
 }
@@ -79,6 +88,7 @@ fn functional_eventer(
     mut query_p: Query<&mut PlayerData, With<Player>>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window, With<PrimaryWindow>>,
+    mut hits: MessageWriter<MonsterHitEvent>,
 ) {
     for ev in events.read() {
         let Ok(mut pdata) = query_p.single_mut() else {
@@ -120,9 +130,15 @@ fn functional_eventer(
                                 if angle < 75.0 {
                                     ai.health -= item.value[0];
                                     ai.stun_cooldown.reset();
+                                    hits.write(MonsterHitEvent {
+                                        damage: item.value[0],
+                                    });
                                 } else if distance < 1.25 * tile_size {
                                     ai.health -= item.value[0];
                                     ai.stun_cooldown.reset();
+                                    hits.write(MonsterHitEvent {
+                                        damage: item.value[0],
+                                    });
                                 }
                             }
                         }

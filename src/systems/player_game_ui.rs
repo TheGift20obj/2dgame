@@ -30,7 +30,6 @@ impl Plugin for HudPlugin {
                 (
                     update_health,
                     update_stamina,
-                    update_score,
                     toggle_inventory,
                     update_inventory,
                     interact_with_inventory,
@@ -53,7 +52,7 @@ impl Default for InventoryState {
     }
 }
 
-pub fn spawn_health_bar(commands: &mut Commands, assets: &Res<AssetServer>, points: u32) {
+pub fn spawn_health_bar(commands: &mut Commands) {
     spawn_stat(
         commands,
         Vec2::new(10., 10.),
@@ -68,24 +67,6 @@ pub fn spawn_health_bar(commands: &mut Commands, assets: &Res<AssetServer>, poin
         Color::srgb(0., 0.8, 0.).into(),
         SataminaBar,
     );
-    commands.spawn((
-        PlayerUIs,
-        GameplayHud,
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Px(72.),
-            left: Val::Px(10.),
-            ..default()
-        },
-        Text::new(format!("Points: {points}")),
-        TextFont {
-            font: assets.load("fonts/Cantarell-Bold.ttf"),
-            font_size: 18.,
-            ..default()
-        },
-        TextColor(Color::WHITE),
-        PointText(points),
-    ));
 }
 
 fn spawn_stat<T: Component>(
@@ -197,6 +178,24 @@ pub fn spawn_inventory_bar(commands: &mut Commands, assets: &Res<AssetServer>) {
                     }
                 });
         });
+}
+
+/// Spawns every piece of the gameplay HUD — health/stamina bars, the
+/// inventory bar, and the quest + progression panels — as a single unit.
+/// This is the one place that should ever be called to (re)create the
+/// gameplay HUD: a fresh Play, a Respawn, and Resuming from the pause menu
+/// (all 3 despawn every `PlayerUIs` entity first, then call this). Keeping
+/// it as one function — rather than each call site invoking the 4 spawn_*
+/// functions individually — is what previously went wrong: Resume's call
+/// site only invoked 2 of the 4 and silently drifted out of sync with Play/
+/// Respawn's, so the Level/XP/Coins and Tasks panels never came back after
+/// closing the pause menu even though the underlying data was never lost.
+/// Adding a 5th HUD piece later only means adding one call here.
+pub fn spawn_gameplay_hud(commands: &mut Commands, assets: &Res<AssetServer>) {
+    spawn_health_bar(commands);
+    spawn_inventory_bar(commands, assets);
+    crate::systems::quests::ui::spawn_quest_panel(commands, assets);
+    crate::systems::progression::spawn_progression_ui(commands, assets);
 }
 
 fn spawn_slot(
@@ -366,15 +365,6 @@ fn update_stamina(
         n.width = Val::Percent((p.satamina / p.max_satamina * 100.).clamp(0., 100.));
     }
 }
-fn update_score(score: Res<Score>, mut q: Query<(&mut Text, &mut PointText)>) {
-    if score.is_changed() {
-        for (mut t, mut p) in &mut q {
-            p.0 = score.0;
-            *t = Text::new(format!("Points: {}", score.0));
-        }
-    }
-}
-
 fn interact_with_inventory(
     state: Res<InventoryState>,
     mouse: Res<ButtonInput<MouseButton>>,

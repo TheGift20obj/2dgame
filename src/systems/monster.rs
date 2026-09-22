@@ -124,6 +124,11 @@ pub struct MonsterCombatConfig {
     /// monster's currently staked-out investigate target before it's nudged
     /// aside — see `deconflict_investigate_point`.
     investigate_claim_radius: f32,
+    /// Lower bound of the random per-kill XP grant — see
+    /// `MonsterKilledEvent::xp_reward`.
+    kill_xp_min: u32,
+    /// Upper bound (inclusive) of the random per-kill XP grant.
+    kill_xp_max: u32,
 }
 
 impl Plugin for MonsterPlugin {
@@ -156,9 +161,12 @@ impl Plugin for MonsterPlugin {
             yield_backoff_speed: 35.0,
             path_claim_penalty: (4.0 * TILE_SIZE) as i64,
             investigate_claim_radius: 2.0 * TILE_SIZE,
+            kill_xp_min: 15,
+            kill_xp_max: 30,
         })
         .insert_resource(MonsterHiveMind::default())
         .insert_resource(PlayerEscapeModel::default())
+        .add_message::<MonsterKilledEvent>()
         .add_systems(
             Update,
             spawn_monsters_system
@@ -535,7 +543,7 @@ fn monster_ai(
     mut colliders: ResMut<ResColliderSet>,
     mut island_manager: ResMut<ResIslandManager>,
     mut commands: Commands,
-    mut score: ResMut<Score>,
+    mut killed: MessageWriter<MonsterKilledEvent>,
     config: Res<MonsterConfig>,
     combat_config: Res<MonsterCombatConfig>,
     atlas_handles: Res<AtlasHandles>,
@@ -639,7 +647,9 @@ fn monster_ai(
                 continue;
             }
             if ai.health <= 0.0 {
-                score.0 += 1;
+                let xp_reward = rand::thread_rng()
+                    .gen_range(combat_config.kill_xp_min..=combat_config.kill_xp_max);
+                killed.write(MonsterKilledEvent { xp_reward });
                 if let Some(apple) = loot_assets.item_config.items.get("apple_red") {
                     let apple_count = rand::thread_rng().gen_range(2..=4);
                     for index in 0..apple_count {

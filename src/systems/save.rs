@@ -1,10 +1,15 @@
 use crate::resourses::physics_resources::*;
 use crate::systems::monster_ai::difficulty::Difficulty;
+use crate::systems::quests::Task;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+
+fn default_player_level() -> u32 {
+    1
+}
 
 pub const SAVE_SLOT_COUNT: u8 = 4;
 
@@ -15,8 +20,9 @@ pub struct ActiveSlot(pub Option<u8>);
 
 /// What must survive across a player death, captured before the dead
 /// player entity is despawned so a later Respawn/Leave can still use it.
-/// Points aren't tracked here — `Score` is a plain resource independent of
-/// any entity's lifetime, so it survives death/respawn on its own.
+/// Coins/XP/level/quest progress aren't tracked here — they're plain
+/// resources independent of any entity's lifetime, so they survive death/
+/// respawn on their own.
 #[derive(Resource, Default)]
 pub struct PendingRespawn {
     pub inventory: Option<HashMap<u32, Item>>,
@@ -44,7 +50,6 @@ pub struct SaveData {
     pub max_satamina: f32,
     pub position: (f32, f32),
     pub inventory: HashMap<u32, Item>,
-    pub points: u32,
     /// Monster AI difficulty this run was started with. Defaults to Normal
     /// for saves written before this field existed.
     #[serde(default)]
@@ -63,6 +68,24 @@ pub struct SaveData {
     pub pack_escape_dir: (f32, f32),
     #[serde(default)]
     pub pack_escape_samples: u32,
+    /// Coin balance — see `progression::Coins`. Defaults to 0 for saves
+    /// written before this field existed.
+    #[serde(default)]
+    pub coins: u64,
+    /// Player level — see `progression::PlayerLevel`. Defaults to 1 (not 0 —
+    /// there's no level 0) for saves written before this field existed.
+    #[serde(default = "default_player_level")]
+    pub level: u32,
+    /// XP progress toward `level + 1` — see `progression::PlayerLevel`.
+    /// Defaults to 0 for saves written before this field existed.
+    #[serde(default)]
+    pub xp: u32,
+    /// The 3 active task slots — see `quests::QuestBoard`. Defaults to empty
+    /// for saves written before the quest system existed; an empty vec is
+    /// treated the same as "generate fresh tasks" by
+    /// `lifecycle::handle_play_requested`.
+    #[serde(default)]
+    pub quests: Vec<Task>,
 }
 
 fn saves_dir() -> PathBuf {
@@ -114,11 +137,14 @@ pub fn player_data_from_save(save: &SaveData) -> PlayerData {
 pub fn capture_save_data(
     transform: &Transform,
     player_data: &PlayerData,
-    points: u32,
     difficulty: Difficulty,
     monsters: Vec<MonsterSaveData>,
     pack_escape_dir: (f32, f32),
     pack_escape_samples: u32,
+    coins: u64,
+    level: u32,
+    xp: u32,
+    quests: Vec<Task>,
 ) -> SaveData {
     SaveData {
         health: player_data.health,
@@ -128,10 +154,13 @@ pub fn capture_save_data(
         max_satamina: player_data.max_satamina,
         position: (transform.translation.x, transform.translation.y),
         inventory: player_data.inventory.items.clone(),
-        points,
         difficulty,
         monsters,
         pack_escape_dir,
         pack_escape_samples,
+        coins,
+        level,
+        xp,
+        quests,
     }
 }

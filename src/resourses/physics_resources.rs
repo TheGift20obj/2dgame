@@ -60,22 +60,6 @@ pub struct AttackStatus(pub bool);
 #[derive(Component)]
 pub struct FinishStatus(pub bool);
 
-/// Display cache only — the number shown in the points UI. `Score` (below)
-/// is the actual source of truth, so this stays correct across the UI
-/// entity itself being despawned/respawned (pause, death, leave) instead of
-/// resetting to whatever hardcoded value a respawn site happens to pass.
-#[derive(Component)]
-pub struct PointText(pub u32);
-
-/// Single source of truth for the player's kill-count score, independent of
-/// any UI entity's lifetime. Previously the *only* place score lived was the
-/// `PointText` UI component itself, which made it trivially easy to lose —
-/// e.g. opening Pause despawned it, and Resume respawned the UI with a
-/// hardcoded 0, silently zeroing the player's score. Set on Play/Respawn
-/// (from the save file or carried over), read wherever a save is written.
-#[derive(Resource, Default, Clone, Copy)]
-pub struct Score(pub u32);
-
 #[derive(Component, Clone)]
 pub struct AnimationIndices {
     pub first: usize,
@@ -327,6 +311,53 @@ pub struct ConsumeEvent {
 pub struct FunctionalEvent {
     pub slot: u32,
     pub item_id: String,
+}
+
+/// Gameplay-fact event: a monster's health reached 0 (see
+/// `monster::monster_ai`'s kill branch). The quest system
+/// (`systems::quests::progress`) is the only reader — it advances any
+/// "kill monsters" task's progress AND grants `xp_reward` directly to the
+/// player (see `progress::track_kills`), both from this one event. Written
+/// only in reaction to a confirmed HP<=0 check inside gameplay logic, never
+/// from UI/input code, so there's no path for the client to fake a kill and
+/// claim credit; and read via the standard `MessageReader`/`Messages`
+/// double-buffer, which delivers each event to a given reader exactly once,
+/// so a kill can't be rewarded twice no matter how many times the UI
+/// reopens or the player respawns/reconnects.
+#[derive(Message)]
+pub struct MonsterKilledEvent {
+    /// Randomized per-kill XP (see `monster::MonsterCombatConfig::kill_xp_min`/
+    /// `kill_xp_max`), rolled once at the moment the kill is confirmed —
+    /// independent of, and in addition to, any "kill monsters" task's own
+    /// completion reward.
+    pub xp_reward: u32,
+}
+
+/// Gameplay-fact event: a melee hit actually landed on a monster (see
+/// `eventer::functional_eventer`). Carries the raw damage dealt so the quest
+/// system can drive both a "deal X damage" and a "hit monsters X times"
+/// objective off the same event instead of needing two separate ones.
+#[derive(Message)]
+pub struct MonsterHitEvent {
+    pub damage: f32,
+}
+
+/// Gameplay-fact event: the player successfully consumed an item (see
+/// `eventer::food_eventer`). `item_type` is copied straight from
+/// `ItemConfig` at the point of consumption, so the quest system can match
+/// "consume food" objectives without a second config lookup.
+#[derive(Message)]
+pub struct ItemConsumedEvent {
+    pub item_id: String,
+    pub item_type: String,
+}
+
+/// Gameplay-fact event: the player picked up a world item into their
+/// inventory (see `items::pickup_nearest_item`).
+#[derive(Message)]
+pub struct ItemCollectedEvent {
+    pub item_id: String,
+    pub amount: u32,
 }
 
 /// UI intent: the user picked a save slot to play. The game lifecycle owns

@@ -1,0 +1,118 @@
+{
+  "health": 40.0,
+  "max_health": 100.0,
+  "satamina": 141.375,
+  "min_satamina": 25.0,
+  "max_satamina": 360.0,
+  "position": [
+    199.00133,
+    1930.7518
+  ],
+  "inventory": {
+    "0": {
+      "id": "sword_basic",
+      "path": "textures/items/sword_icon.png",
+      "value": [
+        10.0,
+        45.0
+      ],
+      "item_type": "weapon",
+      "amount": 0
+    },
+    "1": {
+      "id": "apple_red",
+      "path": "textures/items/apple_icon.png",
+      "value": [
+        10.0,
+        25.0
+      ],
+      "item_type": "food",
+      "amount": 5
+    }
+  },
+  "difficulty": "Hard",
+  "monsters": [
+    {
+      "position": [
+        271.6241,
+        1722.261
+      ],
+      "health": 100.0
+    },
+    {
+      "position": [
+        323.55856,
+        1887.7378
+      ],
+      "health": 100.0
+    },
+    {
+      "position": [
+        1576.754,
+        2705.0059
+      ],
+      "health": 100.0
+    },
+    {
+      "position": [
+        -637.033,
+        1314.2424
+      ],
+      "health": 100.0
+    },
+    {
+      "position": [
+        1483.4863,
+        1927.9581
+      ],
+      "health": 100.0
+    },
+    {
+      "position": [
+        -873.96857,
+        1634.91
+      ],
+      "health": 100.0
+    }
+  ],
+  "pack_escape_dir": [
+    0.2754778,
+    -0.9613075
+  ],
+  "pack_escape_samples": 2516,
+  "coins": 584,
+  "level": 3,
+  "xp": 78,
+  "quests": [
+    {
+      "difficulty": "Easy",
+      "objective": "KillMonsters",
+      "target": 5,
+      "progress": 5,
+      "coin_reward": 167,
+      "xp_reward": 50,
+      "completed": true,
+      "cooldown_ends_at": 1790100642
+    },
+    {
+      "difficulty": "Medium",
+      "objective": "HitMonsters",
+      "target": 21,
+      "progress": 20,
+      "coin_reward": 420,
+      "xp_reward": 210,
+      "completed": false,
+      "cooldown_ends_at": null
+    },
+    {
+      "difficulty": "Hard",
+      "objective": "HitMonsters",
+      "target": 57,
+      "progress": 55,
+      "coin_reward": 1425,
+      "xp_reward": 950,
+      "completed": false,
+      "cooldown_ends_at": null
+    }
+  ]
+}

@@ -14,8 +14,10 @@ use bevy::prelude::*;
 struct SaveContext<'w, 's> {
     active_slot: Res<'w, ActiveSlot>,
     active_difficulty: Res<'w, ActiveDifficulty>,
-    score: Res<'w, Score>,
     escape_model: Res<'w, PlayerEscapeModel>,
+    coins: Res<'w, crate::systems::progression::Coins>,
+    level: Res<'w, crate::systems::progression::PlayerLevel>,
+    quests: Res<'w, crate::systems::quests::QuestBoard>,
     monster_query: Query<'w, 's, (&'static Transform, &'static MonsterAI), With<Monster>>,
 }
 
@@ -205,8 +207,8 @@ pub fn setup_slot_select(commands: &mut Commands, asset_server: &Res<AssetServer
                         Some(data) => {
                             row.spawn((
                                 Text::new(format!(
-                                    "Slot {}  HP {:.0}/{:.0}  Points {}",
-                                    slot, data.health, data.max_health, data.points
+                                    "Slot {}  HP {:.0}/{:.0}  Lv {}  Coins {}",
+                                    slot, data.health, data.max_health, data.level, data.coins
                                 )),
                                 TextFont {
                                     font: font.clone(),
@@ -507,15 +509,12 @@ fn button_system(
                             for root in menu_root_query.iter() {
                                 commands.entity(root).despawn();
                             }
-                            // `score` is a resource independent of the UI
-                            // entity's lifetime, so it survived the pause
-                            // menu despawning the old points display above.
-                            crate::systems::player_game_ui::spawn_health_bar(
-                                &mut commands,
-                                &asset_server,
-                                save_ctx.score.0,
-                            );
-                            crate::systems::player_game_ui::spawn_inventory_bar(
+                            // Coins/XP/level/quest progress are resources
+                            // independent of any UI entity's lifetime, so
+                            // they survived the pause menu despawning the
+                            // old HUD above — `spawn_gameplay_hud` just
+                            // rebuilds the display, it never touches them.
+                            crate::systems::player_game_ui::spawn_gameplay_hud(
                                 &mut commands,
                                 &asset_server,
                             );
@@ -543,11 +542,14 @@ fn button_system(
                                         &save::capture_save_data(
                                             transform,
                                             player_data,
-                                            save_ctx.score.0,
                                             save_ctx.active_difficulty.0,
                                             monsters,
                                             pack_escape_dir,
                                             save_ctx.escape_model.samples(),
+                                            save_ctx.coins.0,
+                                            save_ctx.level.level,
+                                            save_ctx.level.xp,
+                                            save_ctx.quests.slots.to_vec(),
                                         ),
                                     );
                                 }

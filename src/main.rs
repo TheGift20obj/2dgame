@@ -18,6 +18,8 @@ use bevy_firefly::prelude::*;
 use std::collections::HashMap;
 use systems::eventer::EventerPlugin;
 use systems::items::WorldItemsPlugin;
+use systems::progression::ProgressionPlugin;
+use systems::quests::QuestPlugin;
 
 use bevy::window::{MonitorSelection, WindowMode};
 use std::path::Path;
@@ -104,6 +106,8 @@ fn main() {
             EventerPlugin,
             WorldItemsPlugin,
             GameLifecyclePlugin,
+            QuestPlugin,
+            ProgressionPlugin,
         ))
         .add_systems(Startup, load_items_config);
     app.run();

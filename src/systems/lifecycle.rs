@@ -4,6 +4,8 @@ use crate::systems::monster_ai::difficulty::{ActiveDifficulty, sense_config};
 use crate::systems::monster_ai::hivemind::PlayerEscapeModel;
 use crate::systems::physics::remove_rigid_body;
 use crate::systems::player;
+use crate::systems::progression::{Coins, PlayerLevel};
+use crate::systems::quests::{QuestBoard, QuestConfig, TaskDifficulty, generation};
 use crate::systems::save::{self, ActiveSlot, MonsterSaveData, PendingRespawn};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -18,8 +20,10 @@ struct LeaveFlags<'w> {
     resume_status: ResMut<'w, ResumeStatus>,
     active_slot: ResMut<'w, ActiveSlot>,
     active_difficulty: Res<'w, ActiveDifficulty>,
-    score: Res<'w, Score>,
     escape_model: Res<'w, PlayerEscapeModel>,
+    coins: Res<'w, Coins>,
+    level: Res<'w, PlayerLevel>,
+    quests: Res<'w, QuestBoard>,
 }
 
 /// Bundles the handful of small session-flag resources `handle_play_requested`
@@ -32,8 +36,10 @@ struct PlaySessionFlags<'w> {
     game_status: ResMut<'w, GameStatus>,
     active_slot: ResMut<'w, ActiveSlot>,
     active_difficulty: ResMut<'w, ActiveDifficulty>,
-    score: ResMut<'w, Score>,
     escape_model: ResMut<'w, PlayerEscapeModel>,
+    coins: ResMut<'w, Coins>,
+    level: ResMut<'w, PlayerLevel>,
+    quests: ResMut<'w, QuestBoard>,
 }
 
 /// Deterministic ordering for the three concerns that used to race each
@@ -62,7 +68,9 @@ impl Plugin for GameLifecyclePlugin {
         app.insert_resource(ActiveSlot::default())
             .insert_resource(ActiveDifficulty::default())
             .insert_resource(PendingRespawn::default())
-            .insert_resource(Score::default())
+            .insert_resource(Coins::default())
+            .insert_resource(PlayerLevel::default())
+            .insert_resource(QuestBoard::default())
             .add_message::<PlayRequested>()
             .add_message::<PlayerDied>()
             .add_message::<LeaveRequested>()
@@ -99,6 +107,7 @@ fn handle_play_requested(
     config: Res<ItemConfig>,
     atlas_handles: Res<AtlasHandles>,
     combat_config: Res<MonsterCombatConfig>,
+    quest_config: Res<QuestConfig>,
     mut flags: PlaySessionFlags,
 ) {
     // Drain every event this tick, but only ever act once: a player already
@@ -145,7 +154,7 @@ fn handle_play_requested(
         &atlas_handles,
     );
 
-    let points = if let Some(save) = save::read_save(slot) {
+    if let Some(save) = save::read_save(slot) {
         // An existing save always keeps its own difficulty, regardless of
         // what the message carried.
         flags.active_difficulty.0 = save.difficulty;
@@ -180,7 +189,25 @@ fn handle_play_requested(
             }
         }
 
-        save.points
+        flags.coins.0 = save.coins;
+        *flags.level = PlayerLevel::new(save.level, save.xp);
+
+        // Restore the 3 task slots as they were, then immediately catch up
+        // any cooldown that fully elapsed in real time while the player was
+        // offline (see `Task::cooldown_ends_at`'s doc comment) — a task
+        // whose cooldown already finished is replaced right here, before the
+        // player ever sees it, instead of waiting for `progress::
+        // tick_cooldowns` to notice later.
+        let mut restored_slots = if save.quests.len() == 3 {
+            [save.quests[0], save.quests[1], save.quests[2]]
+        } else {
+            TaskDifficulty::ALL
+                .map(|difficulty| generation::generate_task(&quest_config, difficulty))
+        };
+        for task in restored_slots.iter_mut() {
+            generation::refresh_if_expired(&quest_config, task);
+        }
+        flags.quests.slots = restored_slots;
     } else {
         // Fresh slot: write its initial save now, so it's no longer "empty"
         // the next time the slot-select screen is shown.
@@ -188,6 +215,8 @@ fn handle_play_requested(
         flags.active_difficulty.0 = difficulty;
         let mut inventory = Inventory::new();
         inventory.init(&config);
+        let fresh_quests = TaskDifficulty::ALL
+            .map(|difficulty| generation::generate_task(&quest_config, difficulty));
         save::write_save(
             slot,
             &save::SaveData {
@@ -198,19 +227,22 @@ fn handle_play_requested(
                 max_satamina: 360.0,
                 position: (0.0, 0.0),
                 inventory: inventory.items,
-                points: 0,
                 difficulty,
                 monsters: Vec::new(),
                 pack_escape_dir: (0.0, 0.0),
                 pack_escape_samples: 0,
+                coins: 0,
+                level: 1,
+                xp: 0,
+                quests: fresh_quests.to_vec(),
             },
         );
-        0
+        flags.coins.0 = 0;
+        *flags.level = PlayerLevel::new(1, 0);
+        flags.quests.slots = fresh_quests;
     };
 
-    flags.score.0 = points;
-    crate::systems::player_game_ui::spawn_health_bar(&mut commands, &asset_server, points);
-    crate::systems::player_game_ui::spawn_inventory_bar(&mut commands, &asset_server);
+    crate::systems::player_game_ui::spawn_gameplay_hud(&mut commands, &asset_server);
 
     flags.active_slot.0 = Some(slot);
     flags.game_status.0 = true;
@@ -240,8 +272,8 @@ fn handle_player_died(
     }
     let Some(entity) = died else { return };
 
-    // Capture what needs to survive death (inventory, points) before the
-    // entity and its components are gone.
+    // Capture what needs to survive death (inventory) before the entity and
+    // its components are gone.
     if let Ok((handle, player_data)) = player_query.get(entity) {
         pending_respawn.inventory = Some(player_data.inventory.items.clone());
         if let Some(handle) = handle {
@@ -283,7 +315,6 @@ fn handle_respawn_requested(
     atlas_handles: Res<AtlasHandles>,
     mut resume_status: ResMut<ResumeStatus>,
     mut pending_respawn: ResMut<PendingRespawn>,
-    score: Res<Score>,
 ) {
     let mut requested = false;
     for _ in events.read() {
@@ -322,8 +353,7 @@ fn handle_respawn_requested(
             }));
     }
 
-    crate::systems::player_game_ui::spawn_health_bar(&mut commands, &asset_server, score.0);
-    crate::systems::player_game_ui::spawn_inventory_bar(&mut commands, &asset_server);
+    crate::systems::player_game_ui::spawn_gameplay_hud(&mut commands, &asset_server);
 
     resume_status.0 = false;
 }
@@ -386,11 +416,14 @@ fn handle_leave_requested(
                 &save::capture_save_data(
                     transform,
                     player_data,
-                    flags.score.0,
                     flags.active_difficulty.0,
                     monsters,
                     pack_escape_dir,
                     pack_escape_samples,
+                    flags.coins.0,
+                    flags.level.level,
+                    flags.level.xp,
+                    flags.quests.slots.to_vec(),
                 ),
             );
             if let Some(handle) = handle {
@@ -415,11 +448,14 @@ fn handle_leave_requested(
                     max_satamina: 360.0,
                     position: (0.0, 0.0),
                     inventory: items,
-                    points: flags.score.0,
                     difficulty: flags.active_difficulty.0,
                     monsters,
                     pack_escape_dir,
                     pack_escape_samples,
+                    coins: flags.coins.0,
+                    level: flags.level.level,
+                    xp: flags.level.xp,
+                    quests: flags.quests.slots.to_vec(),
                 },
             );
         }

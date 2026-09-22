@@ -8,5 +8,7 @@ pub mod monster_ai;
 pub mod physics;
 pub mod player;
 pub mod player_game_ui;
+pub mod progression;
+pub mod quests;
 pub mod save;
 pub mod terrain;
